@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "微信聊天记录工具",
+  "version": "0.1.0",
+  "identifier": "com.wxchart.app",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "微信聊天记录工具",
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "<源机工作区>/wxchart-tauri/sidecar/.cache/decoded/**",
+          "$APPLOCALDATA/media/**"
+        ]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"],
+    "externalBin": ["binaries/wxchart-data"],
+    "resources": {
+      "binaries/_internal": "_internal"
+    }
+  }
+}

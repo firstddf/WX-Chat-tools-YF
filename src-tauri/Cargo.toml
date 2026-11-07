@@ -1,0 +1,24 @@
+[package]
+name = "wxchart-tauri"
+version = "0.1.0"
+description = "微信聊天记录工具 · Tauri 2 原生壳（Phase 2A）"
+authors = ["wxchart"]
+edition = "2021"
+
+[lib]
+name = "wxchart_tauri"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# protocol-asset：启用 `asset:` 协议（图片缩略图要能 <img src> 加载 sidecar 解码缓存）。
+# Tauri 2.12 里 asset 协议是 Cargo feature 门控（tauri/src/protocol/mod.rs），
+# 只开 tauri.conf.json 的 assetProtocol 不会注册协议；且 tauri-build 会校验两者一致。
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "time"] }

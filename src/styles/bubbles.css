@@ -1,0 +1,392 @@
+/* 消息列表与气泡样式 —— 移植 wxchart-tool exporter._FILTER_CSS（docs/04 B3
+ * wechat_bubble_style 守护的那套：白底气泡、本人 #95ec69、圆角 8、pre-wrap 正文），
+ * 布局几何对齐 Tk MessageView（勾选框外沿、头像紧贴气泡、本人右/他人左）。 */
+
+/* ---- 虚拟滚动容器 ---- */
+.vlist {
+  position: relative;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+  background: #ededed;
+  border: 1px solid #e1e4e8;
+  border-radius: 10px;
+}
+
+.vlist-inner {
+  position: relative;
+  width: 100%;
+}
+
+.vspacer {
+  width: 100%;
+}
+
+/* ---- 空状态（文案与 Tk _draw_empty 一致） ---- */
+.f-empty {
+  text-align: center;
+  color: #8b949e;
+  padding: 36px;
+}
+
+.f-empty .title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #8b949e;
+}
+
+.f-empty .hint {
+  font-size: 12px;
+  color: #b0b6bd;
+  margin-top: 10px;
+}
+
+/* ---- 分组标题条（Tk _draw_group：30px 高 #f6f8fa） ---- */
+.group-header {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #f6f8fa;
+  border-top: 1px solid #e1e4e8;
+  border-bottom: 1px solid #e1e4e8;
+  padding: 0 12px;
+  margin-top: 8px;
+}
+
+.group-header .name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #24292f;
+}
+
+.group-header .meta {
+  font-size: 12px;
+  font-weight: 400;
+  color: #8b949e;
+}
+
+/* ---- 日期/时间分隔条 ---- */
+.day-bar {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #8b949e;
+}
+
+.time-bar {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #9aa0a6;
+}
+
+/* ---- 消息行（移植 .f-msg，勾选框/头像几何对齐 Tk） ---- */
+.msg-row {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  position: relative;
+  padding: 5px 36px;
+  max-width: 100%;
+}
+
+.msg-row.mine {
+  flex-direction: row-reverse;
+}
+
+.msg-row.system {
+  justify-content: center;
+  padding: 4px 36px;
+}
+
+/* 勾选框：多选模式才进 DOM（A1 #1）；本人右侧、他人左侧，与头像不重叠 */
+.msg-row .sel {
+  position: absolute;
+  left: 10px;
+  top: 13px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  color: #1f6feb;
+  user-select: none;
+}
+
+.msg-row.mine .sel {
+  left: auto;
+  right: 10px;
+}
+
+/* 纯浏览（无勾选）：留白收到 12px，头像贴边（A1 #6） */
+.msg-row.no-sel {
+  padding: 5px 12px;
+}
+
+.msg-row.system.no-sel {
+  padding: 4px 12px;
+}
+
+.avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  user-select: none;
+  font-weight: 600;
+}
+
+.msg-body {
+  max-width: min(680px, 78%);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.msg-row.mine .msg-body {
+  align-items: flex-end;
+}
+
+.msg-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: #8b949e;
+  flex-wrap: wrap;
+}
+
+.msg-sender {
+  font-weight: 600;
+  color: #4c5665;
+}
+
+.msg-type {
+  font-size: 11px;
+  border: 1px solid #d8dde3;
+  border-radius: 8px;
+  padding: 0 5px;
+  color: #8b949e;
+  background: #fff;
+}
+
+.bubble {
+  background: #fff;
+  border-radius: 8px;
+  padding: 8px 12px;
+  max-width: 100%;
+  word-break: break-word;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
+}
+
+.msg-row.mine .bubble {
+  background: #95ec69;
+}
+
+.bubble.media-only,
+.msg-row.mine .bubble.media-only {
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
+}
+
+.bubble .text {
+  white-space: pre-wrap;
+  line-height: 1.6;
+  font-size: 14px;
+  margin: 0;
+}
+
+/* 引用块（微信式：左侧细竖条 + 单行省略；A1 #19 单击跳回原消息） */
+.quote-block {
+  border-left: 3px solid #d9d9d9;
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #8b949e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  margin-bottom: 4px;
+  cursor: pointer;
+  /* 引用文字要能拖选复制（拖动选字不触发跳转，见 MessageList.onQuoteClick） */
+  user-select: text;
+}
+
+.quote-block:hover {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.media img.thumb {
+  max-width: 200px;
+  max-height: 200px;
+  border-radius: 6px;
+  display: block;
+}
+
+.media .file-link {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #e3e5e8;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #1a6fd4;
+  max-width: 100%;
+  word-break: break-all;
+  /* 附件名要能拖选复制（A1 #17）：button 默认不可选，显式放开 */
+  user-select: text;
+}
+
+.media .missing {
+  font-size: 13px;
+  color: #8b949e;
+}
+
+.system-text {
+  font-size: 12.5px;
+  color: #8b949e;
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+
+/* ---- 跨气泡拖选：整个范围圈蓝框（A1 #14；Tk _draw_cross_hl 的同一视觉语义） ---- */
+.msg-row.cross-hl {
+  outline: 2px solid #1f6feb;
+  outline-offset: -2px;
+  border-radius: 4px;
+}
+
+/* ---- 右键菜单（A1 #15/#18）：position: fixed 避免被 .vlist 滚动容器裁掉 ---- */
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #d0d7de;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  user-select: none;
+}
+
+.ctx-menu .ctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #24292f;
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ctx-menu .ctx-item:hover:not(:disabled) {
+  background: #f0f6ff;
+}
+
+.ctx-menu .ctx-item:disabled {
+  color: #b6bcc2;
+  cursor: default;
+}
+
+/* ---- 引用跳转定位闪烁（A1 #19；docs/01 D5：CSS 动画 1.4s，主线程零参与） ----
+ * 颜色沿用 Tk gui_chatview 的 FLASH_COLOR #ff9f0a；时长与 logic/quote.ts 的
+ * QUOTE_FLASH_MS 必须同值（e2e 按它等动画结束）。动画播完由 MessageList 的
+ * @animationend 摘掉 .flash —— 不挂定时器，组件卸载无残留（A1 #10）。 */
+@keyframes quote-flash {
+  0% {
+    box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.95);
+  }
+  16% {
+    box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.15);
+  }
+  33% {
+    box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.95);
+  }
+  50% {
+    box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.15);
+  }
+  66% {
+    box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.95);
+  }
+  83% {
+    box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.15);
+  }
+  100% {
+    box-shadow: 0 0 0 3px rgba(255, 159, 10, 0);
+  }
+}
+
+.bubble.flash {
+  animation: quote-flash 1.4s ease-in-out;
+}
+
+/* ---- 引用跳转提示条 / 回跳入口（A1 #19）----
+ * 两者都是 .vlist 内的绝对定位元素：滚动容器内的绝对定位会跟内容一起滚，
+ * 所以 top 由 MessageList 用 scrollTop + 8px 补偿，视觉上钉在消息列表顶部
+ * （提示条居中、返回按钮右上角），换滚动位置也不会跑掉。 */
+.quote-notice {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 40;
+  max-width: calc(100% - 96px);
+  padding: 6px 12px;
+  background: #fff8e6;
+  border: 1px solid #f0c36d;
+  border-radius: 6px;
+  color: #8a5c00;
+  font-size: 12.5px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  pointer-events: none;
+}
+
+.quote-return {
+  position: absolute;
+  right: 12px;
+  z-index: 40;
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid #d0d7de;
+  border-radius: 14px;
+  background: #fff;
+  color: #24292f;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.2;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  user-select: none;
+}
+
+.quote-return:hover {
+  background: #f0f6ff;
+}

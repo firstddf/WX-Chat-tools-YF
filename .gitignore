@@ -1,0 +1,23 @@
+# 构建产物与缓存（全部可再生：cargo / pnpm / PyInstaller / 运行时）
+node_modules/
+src-tauri/target/
+src-tauri/binaries/
+dist/
+sidecar/dist/
+sidecar/build/
+sidecar/.cache/
+sidecar/**/__pycache__/
+__pycache__/
+*.pyc
+
+# 测试与验收产物（证据目录若要留档请单独归档，勿入库）
+test-results/
+playwright-report/
+
+# 运行时日志
+logs/
+src-tauri/logs/
+
+# 本地安装/调试残留
+*.WebView2/
+.DS_Store

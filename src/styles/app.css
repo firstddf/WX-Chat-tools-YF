@@ -1,0 +1,302 @@
+/* 应用外壳与表单控件样式（表单部分移植 exporter._FILTER_CSS 的 f-* 体系） */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+  font-size: 14px;
+  color: #24292f;
+  background: #f0f2f5;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* ---- 账号栏（Tk 顶部「账号: 下拉 + 刷新账号」，两个标签页共用） ---- */
+.accountbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fff;
+  border-bottom: 1px solid #e1e4e8;
+  flex: none;
+}
+
+.account-select {
+  min-width: 260px;
+  max-width: 460px;
+}
+
+.account-status {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: #57606a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.account-status.warn {
+  color: #bc4c00;
+}
+
+/* ---- 标签页 ---- */
+.tabbar {
+  display: flex;
+  gap: 4px;
+  padding: 8px 12px 0;
+  background: #fff;
+  border-bottom: 1px solid #e1e4e8;
+  flex: none;
+}
+
+.tabbar button {
+  border: 1px solid #e1e4e8;
+  border-bottom: none;
+  background: #f6f8fa;
+  padding: 7px 18px;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  color: #57606a;
+  font-family: inherit;
+}
+
+.tabbar button.active {
+  background: #fff;
+  color: #1f6feb;
+  font-weight: 600;
+}
+
+.banner {
+  flex: none;
+  background: #fff1f0;
+  border-bottom: 1px solid #ffccc7;
+  color: #cf1322;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
+.tabpage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  gap: 10px;
+}
+
+/* ---- 表单（移植 _FILTER_CSS） ---- */
+.f-panel {
+  border: 1px solid #e1e4e8;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: none;
+}
+
+.f-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.f-label {
+  font-size: 13px;
+  color: #57606a;
+  white-space: nowrap;
+}
+
+.f-input {
+  padding: 5px 9px;
+  border: 1px solid #d0d7de;
+  border-radius: 7px;
+  font-size: 13px;
+  background: #fff;
+  min-width: 0;
+  color: #24292f;
+  font-family: inherit;
+}
+
+.f-grow {
+  flex: 1 1 240px;
+}
+
+.f-tilde {
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.f-chip {
+  border: 1px solid #d0d7de;
+  background: #fff;
+  border-radius: 14px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #24292f;
+  font-family: inherit;
+}
+
+.f-chip:hover {
+  border-color: #1f6feb;
+}
+
+.f-chip.active {
+  background: #1f6feb;
+  color: #fff;
+  border-color: #1f6feb;
+}
+
+.f-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.f-reset {
+  margin-left: auto;
+}
+
+.f-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 10px;
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  background: #f6f8fa;
+}
+
+.f-btn {
+  border: 1px solid #d0d7de;
+  background: #fff;
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #24292f;
+  font-family: inherit;
+}
+
+.f-btn:hover {
+  border-color: #1f6feb;
+  color: #1f6feb;
+}
+
+.f-btn.primary {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+
+.f-btn.primary:hover {
+  background: #1a5fd0;
+  color: #fff;
+}
+
+.f-count {
+  font-size: 12px;
+  color: #57606a;
+}
+
+.f-sep {
+  width: 1px;
+  height: 20px;
+  background: #d0d7de;
+  margin: 0 2px;
+}
+
+/* ---- 状态栏 ---- */
+.statusbar {
+  flex: none;
+  font-size: 12.5px;
+  color: #57606a;
+  padding: 4px 2px;
+  min-height: 20px;
+  word-break: break-all;
+}
+
+.statusbar.warn {
+  color: #bc4c00;
+}
+
+/* ---- 管理页 ---- */
+.manage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.manage-body {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+.chat-tree {
+  width: 320px;
+  flex: none;
+  background: #fff;
+  border: 1px solid #e1e4e8;
+  border-radius: 10px;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.chat-row {
+  padding: 7px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-row:hover {
+  background: #f6f8fa;
+}
+
+.chat-row.active {
+  background: #ddf4ff;
+}
+
+.chat-name {
+  font-size: 13.5px;
+  color: #24292f;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-meta {
+  font-size: 11.5px;
+  color: #8b949e;
+}
+
+.browse-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}

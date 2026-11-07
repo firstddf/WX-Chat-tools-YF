@@ -1,0 +1,15 @@
+{
+  "identifier": "default",
+  "description": "主窗口默认能力（M-A2：核心事件 + dialog/opener 插件命令；asset 协议不在此配置——tauri 2.12 无 asset ACL 权限，只由 tauri.conf.json app.security.assetProtocol 的 scope 控制）",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "dialog:allow-ask",
+    "dialog:allow-message",
+    "opener:allow-open-path",
+    "opener:allow-open-url",
+    "opener:allow-reveal-item-in-dir"
+  ]
+}
