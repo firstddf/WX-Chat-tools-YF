@@ -152,7 +152,8 @@ media[{kind,name,path}], day_page`。
 | `open_path` | `{path}` | `{ok}` | opener 插件；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED` |
 | `reveal_path` | `{path}` | `{ok}` | 在资源管理器中定位 |
 | `doctor` | `{}` | 见 §1.2 | M-A4 |
-| `get_settings` / `set_settings` | `{...}` | `{...}` | 最近账号、输出目录、快捷日期等，存 app config 目录 |
+| `get_settings` | `{}` | `{last_account, last_export_dir}`（均为 string，缺省 `""`） | 读应用设置；文件不存在/损坏 → 默认值（**损坏容忍**，2026-11-09 #4 冻结） |
+| `set_settings` | `{patch:{last_account?, last_export_dir?}}` | 合并后的全量设置（同上形状） | **白名单字段**合并写入 `%APPDATA%\com.wxchart.app\settings.json`（原子 tmp+rename）；**未知字段/非字符串值 → `INTERNAL`**（message 指明字段——防 `lastAccount` 这类拼写静默丢失）；单窗口，跨窗口同步见 §3 `settings://changed` 裁剪注 |
 
 **筛选不在 IPC 层**：`load_data` 后所有筛选/分组/选区/引用跳转都在前端内存完成（D2 决策）。
 
@@ -162,7 +163,7 @@ media[{kind,name,path}], day_page`。
 |---|---|---|
 | `data://progress` | `{phase, done, total, message}` | `load_data` / `export_messages` 期间（转发 sidecar `progress` 通知） |
 | `sidecar://status` | `{state:"starting"\|"ready"\|"restarted"\|"failed"\|"mismatch", detail?}` | sidecar 生命周期变化；`failed` 时前端显示降级横幅；`mismatch`=协议主版本不一致（见 §2 `app_info`） |
-| `settings://changed` | `{...}` | 设置被其它窗口修改（预留） |
+| `settings://changed` | `{...}` | 设置被其它窗口修改（**预留不实现**：本项目单窗口，2026-11-09 #4 施工时裁剪——`get/set_settings` 已可用，跨窗口同步暂无消费方；若将来多窗口再启用） |
 
 ## 4. 错误码
 

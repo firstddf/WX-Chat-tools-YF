@@ -154,6 +154,12 @@ export interface AppInfo {
   sidecar: SidecarStatus;
 }
 
+/** 应用设置（docs/02 §2 2026-11-09 冻结：白名单两字段，缺省空串） */
+export interface AppSettings {
+  last_account: string;
+  last_export_dir: string;
+}
+
 export type LoadParams =
   | { kind: 'store'; account?: string; options?: { resolve_media?: boolean } }
   | { kind: 'export'; out_dir: string };
@@ -177,6 +183,10 @@ export interface Ipc {
   exportMessages(params: ExportParams): Promise<ExportResult>;
   openPath(path: string): Promise<{ ok: boolean }>;
   revealPath(path: string): Promise<{ ok: boolean }>;
+  /** 读应用设置（docs/02 §2；文件缺失/损坏 → 默认空串） */
+  getSettings(): Promise<AppSettings>;
+  /** 白名单合并写设置；未知字段/非字符串 → INTERNAL（docs/02 §2） */
+  setSettings(patch: Partial<AppSettings>): Promise<AppSettings>;
   /** 订阅进度通知；返回退订函数 */
   onProgress(cb: (p: ProgressParams) => void): () => void;
   /** 订阅 sidecar 状态事件；返回退订函数 */

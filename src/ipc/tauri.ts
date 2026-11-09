@@ -7,7 +7,7 @@ import {
   EVENT_PROGRESS, EVENT_SIDECAR_STATUS, PROTOCOL_VERSION,
 } from './types';
 import type {
-  Account, AppInfo, ExportParams, ExportResult, Ipc, LoadParams, LoadResult,
+  Account, AppInfo, AppSettings, ExportParams, ExportResult, Ipc, LoadParams, LoadResult,
   ProgressParams, ProtocolError, ResolveMediaResult, SidecarStatus,
 } from './types';
 
@@ -83,6 +83,22 @@ export class TauriIpc implements Ipc {
   async revealPath(path: string): Promise<{ ok: boolean }> {
     try {
       return await invoke<{ ok: boolean }>('reveal_path', { path });
+    } catch (e) {
+      throw asProtocolError(e);
+    }
+  }
+
+  async getSettings(): Promise<AppSettings> {
+    try {
+      return await invoke<AppSettings>('get_settings');
+    } catch (e) {
+      throw asProtocolError(e);
+    }
+  }
+
+  async setSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+    try {
+      return await invoke<AppSettings>('set_settings', { patch });
     } catch (e) {
       throw asProtocolError(e);
     }

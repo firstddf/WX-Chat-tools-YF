@@ -3,11 +3,16 @@
 import { deriveChats, deriveStats } from '../logic/derive';
 import { makeAccounts, makeMessages } from './fixtures';
 import type {
-  Account, AppInfo, ErrorInjection, ExportParams, ExportResult, Ipc, LoadParams,
+  Account, AppInfo, AppSettings, ErrorInjection, ExportParams, ExportResult, Ipc, LoadParams,
   LoadResult, Media, Message, ProgressParams, ProtocolError, ResolveMediaResult,
   SidecarStatus,
 } from './types';
 import { PROTOCOL_VERSION } from './types';
+
+/** Mock 设置持久层键（localStorage）——跨页面重载的记忆语义由它承载（docs/07 #4 e2e） */
+export const MOCK_SETTINGS_KEY = 'wxchart.mock.settings';
+
+const SETTINGS_DEFAULTS: AppSettings = { last_account: '', last_export_dir: '' };
 
 /** `resolve_media` 注入钩子：测试/浏览器 dev 用它回「已解码」数据；缺省走默认实现 */
 export type ResolveMediaHook = (
@@ -170,6 +175,41 @@ export class MockIpc implements Ipc {
 
   async revealPath(): Promise<{ ok: boolean }> {
     return { ok: true };
+  }
+
+  /** docs/02 §2 `get_settings`：localStorage 持久层；缺失/损坏 → 默认（镜像壳的损坏容忍） */
+  async getSettings(): Promise<AppSettings> {
+    await delay(this.latencyMs);
+    try {
+      const raw = localStorage.getItem(MOCK_SETTINGS_KEY);
+      if (!raw) return { ...SETTINGS_DEFAULTS };
+      const obj = JSON.parse(raw) as Record<string, unknown>;
+      return {
+        last_account: typeof obj.last_account === 'string' ? obj.last_account : '',
+        last_export_dir: typeof obj.last_export_dir === 'string' ? obj.last_export_dir : '',
+      };
+    } catch {
+      return { ...SETTINGS_DEFAULTS };
+    }
+  }
+
+  /** docs/02 §2 `set_settings`：白名单合并（与壳同口径：未知键/非字符串 → INTERNAL） */
+  async setSettings(patch: Partial<AppSettings>): Promise<AppSettings> {
+    this.calls.push({ method: 'setSettings', params: { patch } }); // 断言用
+    await delay(this.latencyMs);
+    const next = await this.getSettings();
+    for (const [key, val] of Object.entries(patch)) {
+      if (key !== 'last_account' && key !== 'last_export_dir') {
+        throw { code: 'INTERNAL', message: `set_settings 字段不在白名单: ${key}` } satisfies ProtocolError;
+      }
+      if (typeof val !== 'string') {
+        throw { code: 'INTERNAL', message: `set_settings 字段必须是字符串: ${key}` } satisfies ProtocolError;
+      }
+      if (key === 'last_account') next.last_account = val;
+      else next.last_export_dir = val;
+    }
+    localStorage.setItem(MOCK_SETTINGS_KEY, JSON.stringify(next));
+    return next;
   }
 
   onProgress(cb: (p: ProgressParams) => void): () => void {

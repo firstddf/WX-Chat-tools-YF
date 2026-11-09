@@ -439,6 +439,26 @@ test('本地数据 #3 回读数据驱动全链路：筛选在 export 来源下�
   await expect(status(page)).toContainText('来源：导出目录');
 });
 
+// ---------------------------------------------------------------- 设置记忆（docs/07 #4）
+
+test('设置记忆 #4 换账号 → 重开页面自动恢复（mock 持久层 localStorage）', async ({ page }) => {
+  await page.goto('/');
+  // 初始无记忆 → Tk 口径选列表第一个（最近活跃）
+  await expect(page.getByTestId('cmb_account')).toHaveValue('wxid_mock_alpha');
+  await expect(page.getByTestId('account_status')).toContainText('已选账号：wxid_mock_alpha');
+
+  // 用户手动换账号 → setAccount 持久化 last_account
+  await page.getByTestId('cmb_account').selectOption('wxid_mock_beta');
+  await expect(page.getByTestId('account_status')).toContainText('已选账号：wxid_mock_beta');
+
+  // 重开页面（模拟重启应用）→ init 读设置 → 扫描后记忆优先
+  await page.reload();
+  await expect(page.getByTestId('cmb_account')).toHaveValue('wxid_mock_beta');
+  await expect(page.getByTestId('account_status')).toContainText('已选账号：wxid_mock_beta');
+});
+
+// ---------------------------------------------------------------- A2 #26
+
 test('A2 #26 管理页「在筛选中查找」→ 切页 + entry_chat 预填 + 结果只剩该会话', async ({ page }) => {
   await gotoAndInstall(page);
   await load(page);

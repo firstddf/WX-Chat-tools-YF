@@ -3,6 +3,7 @@
 
 mod commands;
 mod error;
+mod settings;
 mod sidecar;
 mod state;
 
@@ -20,6 +21,8 @@ pub fn run() {
             commands::resolve_media,
             commands::open_path,
             commands::reveal_path,
+            settings::get_settings,
+            settings::set_settings,
         ])
         .setup(|app| {
             // sidecar 生命周期（docs/03 §3）：spawn → 5s ping 握手 → status 事件

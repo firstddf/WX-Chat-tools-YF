@@ -4,7 +4,7 @@ import { computed, reactive, ref, type ComputedRef, type InjectionKey, type Ref 
 import { filterIndexed } from '../logic/filter';
 import type { Indexed } from '../logic/plan';
 import type {
-  Account, AppInfo, Chat, ExportParams, ExportResult, FilterSpec, Ipc, LoadParams,
+  Account, AppInfo, AppSettings, Chat, ExportParams, ExportResult, FilterSpec, Ipc, LoadParams,
   LoadStats, LoadResult, Message, ProgressParams, ProtocolError, ResolveMediaResult,
   SidecarStatus,
 } from '../ipc/types';
@@ -34,6 +34,8 @@ export interface DataState {
   accountsError: ProtocolError | null;
   /** 账号扫描中（刷新按钮禁用 + 账号栏状态文字） */
   scanning: boolean;
+  /** 应用设置（docs/02 §2；init 时读取，换账号时持久化 last_account） */
+  settings: AppSettings;
 }
 
 // ---------------------------------------------------------------- 选择（Tk MessageView 语义）
@@ -174,6 +176,7 @@ export function createStore(ipc: Ipc): AppStore {
     accountsScanned: false,
     accountsError: null,
     scanning: false,
+    settings: { last_account: '', last_export_dir: '' },
   });
 
   const filter = reactive<FilterSpec>({
@@ -302,8 +305,12 @@ export function createStore(ipc: Ipc): AppStore {
         const res = await ipc.scanAccounts();
         data.accounts = res.accounts;
         data.accountsScanned = true;
-        // 与 Tk refresh_accounts 一致：重建选项后 current(0)（无账号则清空选择）
-        applyAccount(res.accounts[0]?.wxid ?? '');
+        // 记忆优先（docs/07 #4）：settings.last_account 还在选项里 → 选它；
+        // 否则回退 Tk 口径 current(0) = 最近活跃（无账号则清空选择）
+        const remembered = data.settings.last_account;
+        const chosen =
+          res.accounts.find((a) => a.wxid === remembered)?.wxid ?? res.accounts[0]?.wxid ?? '';
+        applyAccount(chosen);
       } catch (e) {
         data.accounts = [];
         data.accountsScanned = true;
@@ -321,6 +328,14 @@ export function createStore(ipc: Ipc): AppStore {
 
   function setAccount(wxid: string): void {
     applyAccount(wxid);
+    if (!wxid) return;
+    // 持久化账号记忆（docs/07 #4）：best-effort，写失败静默、不打断交互
+    void ipc
+      .setSettings({ last_account: wxid })
+      .then((s) => {
+        data.settings = s;
+      })
+      .catch(() => {});
   }
 
   async function init(): Promise<void> {
@@ -346,6 +361,12 @@ export function createStore(ipc: Ipc): AppStore {
     ipc.onSidecarStatus((s: SidecarStatus) => {
       data.sidecar = s;
     });
+    // 读应用设置（docs/07 #4）：best-effort——读失败不阻断启动，按无记忆走
+    try {
+      data.settings = await ipc.getSettings();
+    } catch {
+      data.settings = { last_account: '', last_export_dir: '' };
+    }
     // 启动即扫描一次账号（与 Tk __init__ 末尾 refresh_accounts() 一致）
     await scanAccounts();
   }
