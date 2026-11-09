@@ -5,14 +5,14 @@ import { makeAccounts, makeMessages } from './fixtures';
 import type {
   Account, AppInfo, AppSettings, ErrorInjection, ExportParams, ExportResult, Ipc, LoadParams,
   LoadResult, Media, Message, ProgressParams, ProtocolError, ResolveMediaResult,
-  SidecarStatus,
+  ScanAccountsResult, SidecarStatus,
 } from './types';
 import { PROTOCOL_VERSION } from './types';
 
 /** Mock 设置持久层键（localStorage）——跨页面重载的记忆语义由它承载（docs/07 #4 e2e） */
 export const MOCK_SETTINGS_KEY = 'wxchart.mock.settings';
 
-const SETTINGS_DEFAULTS: AppSettings = { last_account: '', last_export_dir: '' };
+const SETTINGS_DEFAULTS: AppSettings = { last_account: '', last_export_dir: '', data_root: '' };
 
 /** `resolve_media` 注入钩子：测试/浏览器 dev 用它回「已解码」数据；缺省走默认实现 */
 export type ResolveMediaHook = (
@@ -109,11 +109,18 @@ export class MockIpc implements Ipc {
     };
   }
 
-  async scanAccounts(): Promise<{ accounts: Account[] }> {
-    this.calls.push({ method: 'scanAccounts', params: {} }); // 刷新账号测试据此断言
+  async scanAccounts(): Promise<ScanAccountsResult> {
+    // 与壳同口径（#13）：settings.data_root 显式注入 → root 回显、tried 记录
+    //（壳读 settings 文件注入，mock 读自己的持久层——e2e 据 root 回显断言）
+    const settings = await this.getSettings();
+    this.calls.push({ method: 'scanAccounts', params: { root: settings.data_root || null } });
     await delay(this.latencyMs);
     this.fail('scanAccounts');
-    return { accounts: this.accounts.map((a) => ({ ...a })) };
+    return {
+      accounts: this.accounts.map((a) => ({ ...a })),
+      root: settings.data_root || '',
+      tried: settings.data_root ? [settings.data_root] : [],
+    };
   }
 
   async loadData(params: LoadParams): Promise<LoadResult> {
@@ -187,6 +194,7 @@ export class MockIpc implements Ipc {
       return {
         last_account: typeof obj.last_account === 'string' ? obj.last_account : '',
         last_export_dir: typeof obj.last_export_dir === 'string' ? obj.last_export_dir : '',
+        data_root: typeof obj.data_root === 'string' ? obj.data_root : '',
       };
     } catch {
       return { ...SETTINGS_DEFAULTS };
@@ -199,14 +207,15 @@ export class MockIpc implements Ipc {
     await delay(this.latencyMs);
     const next = await this.getSettings();
     for (const [key, val] of Object.entries(patch)) {
-      if (key !== 'last_account' && key !== 'last_export_dir') {
+      if (key !== 'last_account' && key !== 'last_export_dir' && key !== 'data_root') {
         throw { code: 'INTERNAL', message: `set_settings 字段不在白名单: ${key}` } satisfies ProtocolError;
       }
       if (typeof val !== 'string') {
         throw { code: 'INTERNAL', message: `set_settings 字段必须是字符串: ${key}` } satisfies ProtocolError;
       }
       if (key === 'last_account') next.last_account = val;
-      else next.last_export_dir = val;
+      else if (key === 'last_export_dir') next.last_export_dir = val;
+      else next.data_root = val;
     }
     localStorage.setItem(MOCK_SETTINGS_KEY, JSON.stringify(next));
     return next;

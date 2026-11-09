@@ -1200,6 +1200,58 @@ def test_export_bundle_before_load_source_unavailable() -> None:
             assert exc.code == "SOURCE_UNAVAILABLE"
 
 
+# ---------------------------------------------------------------- scan_accounts 数据目录（docs/07 #13）
+
+def test_scan_accounts_root_and_discovery() -> None:
+    """scan_accounts root 参数与自动发现（docs/02 §1.2 2026-11-09 #13）：
+    显式 root 只试它不回落；无 root 走发现顺序（env → 常见位置 → 数据层默认）并记 tried。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+
+        # 1) 显式 root 命中：造 <root>/wxid_probe_xxx/db_storage/message 结构
+        #（env 根清空——发现顺序 env 最高优先，测试不得受宿主环境影响）
+        root = tmp_path / "manual-root"
+        (root / "wxid_probe_1" / "db_storage" / "message").mkdir(parents=True)
+        p = Proc(env={"WXCHART_XWECHAT_ROOT": ""})
+        try:
+            res = p.ask({"id": 1, "method": "scan_accounts", "params": {"root": str(root)}})
+            r = res["result"]
+            assert [a["wxid"] for a in r["accounts"]] == ["wxid_probe_1"], r
+            assert r["root"] == str(root)
+            assert r["tried"] == [str(root)], "显式 root 只试它（不回落）"
+
+            # 2) 显式 root 无账号 → 空结果且仍只试它
+            empty = tmp_path / "empty-root"
+            empty.mkdir()
+            res = p.ask({"id": 2, "method": "scan_accounts", "params": {"root": str(empty)}})
+            r2 = res["result"]
+            assert r2["accounts"] == [] and r2["root"] == ""
+            assert r2["tried"] == [str(empty)]
+        finally:
+            p.stop()
+
+        # 3) 无 root：APPDATA/USERPROFILE 指到空 tmp（env 根清空）→ 候选全 miss、tried 含候选
+        roaming = tmp_path / "roaming"
+        home = tmp_path / "home"
+        roaming.mkdir()
+        home.mkdir()
+        env = {
+            "APPDATA": str(roaming),
+            "USERPROFILE": str(home),
+            "WXCHART_XWECHAT_ROOT": "",   # 空串=未设置（falsy）
+        }
+        p2 = Proc(env=env)
+        try:
+            res = p2.ask({"id": 1, "method": "scan_accounts", "params": {}})
+            r3 = res["result"]
+            assert r3["accounts"] == [] and r3["root"] == ""
+            assert str(roaming / "Tencent" / "xwechat_files") in r3["tried"], r3["tried"]
+            assert str(home / "Documents" / "WeChat Files") in r3["tried"], r3["tried"]
+            assert len(r3["tried"]) >= 3, f"候选含数据层默认，应≥3：{r3['tried']}"
+        finally:
+            p2.stop()
+
+
 # ---------------------------------------------------------------- 直跑入口
 
 def main() -> int:

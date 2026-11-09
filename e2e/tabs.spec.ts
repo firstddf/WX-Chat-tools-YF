@@ -457,6 +457,26 @@ test('设置记忆 #4 换账号 → 重开页面自动恢复（mock 持久层 lo
   await expect(page.getByTestId('account_status')).toContainText('已选账号：wxid_mock_beta');
 });
 
+// ---------------------------------------------------------------- 数据目录（docs/07 #13）
+
+test('数据目录 #13 手动设置 → 扫描注入 root + 状态回显 + 重开保持 + 恢复自动', async ({ page }) => {
+  await page.goto('/');
+  // 初始：自动发现口径（mock 无 data_root → 不回显数据目录）
+  await expect(page.getByTestId('account_status')).not.toContainText('数据目录：');
+
+  // 手动设置（浏览器 dev 的 pickDir 回固定路径）→ setSettings → 重扫注入 root → 状态回显
+  await page.getByTestId('btn_pick_data_root').click();
+  await expect(page.getByTestId('account_status')).toContainText('数据目录：C:/mock/local-data');
+  // 持久层写入（localStorage）→ 重开页面仍带 root（init 读设置 → 扫描注入）
+  await page.reload();
+  await expect(page.getByTestId('account_status')).toContainText('数据目录：C:/mock/local-data');
+
+  // 恢复自动：清 data_root 重扫 → 状态回显消失、入口按钮随 v-if 收起
+  await page.getByTestId('btn_auto_data_root').click();
+  await expect(page.getByTestId('account_status')).not.toContainText('数据目录：');
+  await expect(page.getByTestId('btn_auto_data_root')).toHaveCount(0);
+});
+
 // ---------------------------------------------------------------- A2 #26
 
 test('A2 #26 管理页「在筛选中查找」→ 切页 + entry_chat 预填 + 结果只剩该会话', async ({ page }) => {

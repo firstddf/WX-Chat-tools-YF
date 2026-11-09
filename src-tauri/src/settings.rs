@@ -20,6 +20,8 @@ use crate::error::AppError;
 pub struct Settings {
     pub last_account: String,
     pub last_export_dir: String,
+    /// 微信数据目录（docs/07 #13 增补）：空串 = 自动发现（scan_accounts 发现顺序见 docs/02 §1.2）
+    pub data_root: String,
 }
 
 impl Settings {
@@ -32,7 +34,7 @@ impl Settings {
     }
 
     /// 白名单合并（命令层与单测共用；校验在写盘前完成，失败不落盘）。
-    /// **白名单 = docs/02 §2 的 `last_account` / `last_export_dir`**：
+    /// **白名单 = docs/02 §2 的 `last_account` / `last_export_dir` / `data_root`**：
     /// 名单外键（含 `lastAccount` 这类拼写变体）→ `INTERNAL`，防静默丢失。
     pub fn apply_patch(&mut self, patch: &Value) -> Result<(), AppError> {
         let obj = patch
@@ -45,6 +47,7 @@ impl Settings {
             match key.as_str() {
                 "last_account" => self.last_account = text.to_string(),
                 "last_export_dir" => self.last_export_dir = text.to_string(),
+                "data_root" => self.data_root = text.to_string(),
                 other => {
                     return Err(AppError::internal(format!(
                         "set_settings 字段不在白名单: {other}"
@@ -77,10 +80,15 @@ fn settings_path(app: &tauri::AppHandle) -> Result<PathBuf, AppError> {
     Ok(dir.join("settings.json"))
 }
 
+/// 读当前设置（命令与其它壳逻辑共用，如 `scan_accounts` 注入 `data_root`）。
+pub fn load_for_app(app: &tauri::AppHandle) -> Result<Settings, AppError> {
+    Ok(Settings::load(&settings_path(app)?))
+}
+
 /// docs/02 §2 `get_settings`：返回全量设置（缺省空串）。
 #[tauri::command]
 pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, AppError> {
-    Ok(Settings::load(&settings_path(&app)?))
+    load_for_app(&app)
 }
 
 /// docs/02 §2 `set_settings`：白名单合并写入，返回合并后全量设置。
@@ -154,8 +162,10 @@ mod tests {
         let mut s = Settings::default();
         s.apply_patch(&json!({"last_account": "wxid_a"})).unwrap();
         s.apply_patch(&json!({"last_export_dir": "D:\\x"})).unwrap();
+        s.apply_patch(&json!({"data_root": "D:\\微信数据\\xwechat_files"})).unwrap();
         assert_eq!(s.last_account, "wxid_a");
         assert_eq!(s.last_export_dir, "D:\\x");
+        assert_eq!(s.data_root, "D:\\微信数据\\xwechat_files");
         // 空 patch 合并为无操作
         s.apply_patch(&json!({})).unwrap();
         assert_eq!(s.last_account, "wxid_a");

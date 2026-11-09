@@ -36,6 +36,10 @@ export interface DataState {
   scanning: boolean;
   /** 应用设置（docs/02 §2；init 时读取，换账号时持久化 last_account） */
   settings: AppSettings;
+  /** 最近一次扫描命中的数据目录（#13，空=未命中/自动发现失败；状态行回显） */
+  accountsRoot: string;
+  /** 最近一次扫描尝试过的位置（#13；空结果时状态行给可操作引导） */
+  accountsTried: string[];
 }
 
 // ---------------------------------------------------------------- 选择（Tk MessageView 语义）
@@ -133,6 +137,8 @@ export interface AppStore {
   setAccount(wxid: string): void;
   load(params: LoadParams): Promise<void>;
   exportMessages(params: ExportParams): Promise<ExportResult>;
+  /** 设置微信数据目录并重扫（#13；空串=恢复自动发现） */
+  setDataRoot(root: string): Promise<void>;
   setFilter(patch: Partial<FilterSpec>): void;
   resetFilter(): void;
   /**
@@ -176,7 +182,9 @@ export function createStore(ipc: Ipc): AppStore {
     accountsScanned: false,
     accountsError: null,
     scanning: false,
-    settings: { last_account: '', last_export_dir: '' },
+    settings: { last_account: '', last_export_dir: '', data_root: '' },
+    accountsRoot: '',
+    accountsTried: [],
   });
 
   const filter = reactive<FilterSpec>({
@@ -304,6 +312,8 @@ export function createStore(ipc: Ipc): AppStore {
       try {
         const res = await ipc.scanAccounts();
         data.accounts = res.accounts;
+        data.accountsRoot = res.root ?? '';
+        data.accountsTried = res.tried ?? [];
         data.accountsScanned = true;
         // 记忆优先（docs/07 #4）：settings.last_account 还在选项里 → 选它；
         // 否则回退 Tk 口径 current(0) = 最近活跃（无账号则清空选择）
@@ -313,6 +323,8 @@ export function createStore(ipc: Ipc): AppStore {
         applyAccount(chosen);
       } catch (e) {
         data.accounts = [];
+        data.accountsRoot = '';
+        data.accountsTried = [];
         data.accountsScanned = true;
         applyAccount('');
         data.accountsError = toProtocolError(e); // 扫描失败：账号栏显示 message，不白屏
@@ -336,6 +348,17 @@ export function createStore(ipc: Ipc): AppStore {
         data.settings = s;
       })
       .catch(() => {});
+  }
+
+  /** 设置微信数据目录（docs/07 #13）：写 settings.data_root → 立即按新口径重扫。
+   *  空串 = 恢复自动发现。写设置失败不扫（保持现状）。 */
+  async function setDataRoot(root: string): Promise<void> {
+    try {
+      data.settings = await ipc.setSettings({ data_root: root });
+    } catch {
+      return;
+    }
+    await scanAccounts();
   }
 
   async function init(): Promise<void> {
@@ -365,7 +388,7 @@ export function createStore(ipc: Ipc): AppStore {
     try {
       data.settings = await ipc.getSettings();
     } catch {
-      data.settings = { last_account: '', last_export_dir: '' };
+      data.settings = { last_account: '', last_export_dir: '', data_root: '' };
     }
     // 启动即扫描一次账号（与 Tk __init__ 末尾 refresh_accounts() 一致）
     await scanAccounts();
@@ -443,6 +466,6 @@ export function createStore(ipc: Ipc): AppStore {
   return {
     ipc, data, filter, matched, selection, statusText,
     init, scanAccounts, setAccount, load, exportMessages, setFilter, resetFilter,
-    queueResolveMedia, isDecodeFailed,
+    setDataRoot, queueResolveMedia, isDecodeFailed,
   };
 }

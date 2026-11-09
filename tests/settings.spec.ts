@@ -11,19 +11,24 @@ describe('settings（docs/07 #4 get_settings/set_settings）', () => {
   it('合并写入 → 新实例读回（跨重开记忆）+ 部分字段不互相覆盖', async () => {
     const first = new MockIpc();
     const written = await first.setSettings({ last_account: 'wxid_mock_beta' });
-    expect(written).toEqual({ last_account: 'wxid_mock_beta', last_export_dir: '' });
+    expect(written).toEqual({ last_account: 'wxid_mock_beta', last_export_dir: '', data_root: '' });
     expect(first.calls.some((c) => c.method === 'setSettings')).toBe(true);
 
     const reopened = new MockIpc(); // 模拟重开页面（持久层共享）
     expect((await reopened.getSettings()).last_account).toBe('wxid_mock_beta');
     const merged = await reopened.setSettings({ last_export_dir: 'D:/out' });
-    expect(merged).toEqual({ last_account: 'wxid_mock_beta', last_export_dir: 'D:/out' });
+    expect(merged).toEqual({ last_account: 'wxid_mock_beta', last_export_dir: 'D:/out', data_root: '' });
+    // data_root（#13 增补字段）同样白名单读写、互不覆盖
+    const withRoot = await reopened.setSettings({ data_root: 'D:\\微信数据\\xwechat_files' });
+    expect(withRoot).toEqual({
+      last_account: 'wxid_mock_beta', last_export_dir: 'D:/out', data_root: 'D:\\微信数据\\xwechat_files',
+    });
   });
 
   it('损坏的持久层数据 → 回默认不抛错（镜像壳的损坏容忍）', async () => {
     localStorage.setItem(MOCK_SETTINGS_KEY, '{oops not json');
     const ipc = new MockIpc();
-    expect(await ipc.getSettings()).toEqual({ last_account: '', last_export_dir: '' });
+    expect(await ipc.getSettings()).toEqual({ last_account: '', last_export_dir: '', data_root: '' });
   });
 
   it('白名单：未知字段/非字符串 → INTERNAL 且不落盘', async () => {

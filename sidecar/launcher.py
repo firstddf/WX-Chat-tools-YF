@@ -33,6 +33,9 @@ from mapping import PROTOCOL_VERSION, SidecarError  # noqa: E402
 
 from wxchart import __version__ as APP_VERSION  # noqa: E402
 from wxchart import config, exporter, guidata, keys, model  # noqa: E402
+# 模块级导入（不从 config 属性取）：测试会整体 patch `launcher.config`，
+# 属性访问会拿到 Mock，Path(Mock) 直接炸
+from wxchart.config import DEFAULT_XWECHAT_ROOT  # noqa: E402
 from wxchart.model import MediaAsset  # noqa: E402  直接引类：定位 helper 不受 model 打桩影响
 from wxchart.store import Store  # noqa: E402
 
@@ -84,7 +87,7 @@ class Sidecar:
         if method == "ping":
             return mapping.ping_result()
         if method == "scan_accounts":
-            return self._scan_accounts()          # 只读，不入 load/export 互斥
+            return self._scan_accounts(params)    # 只读，不入 load/export 互斥
         if method == "load_source":
             return self._exclusive(self._load_source, params)
         if method == "resolve_media":
@@ -108,9 +111,14 @@ class Sidecar:
 
     # ------------------------------------------------------------ 方法
 
-    def _scan_accounts(self) -> dict[str, Any]:
-        accounts = config.discover_accounts(_xwechat_root())
-        return {"accounts": [mapping.account_row(a) for a in accounts]}
+    def _scan_accounts(self, params: dict[str, Any]) -> dict[str, Any]:
+        """账号扫描（docs/02 §1.2 2026-11-09 #13）：同一发现口径，附 root/tried 诊断。"""
+        accounts, tried = _discover_accounts(params.get("root"))
+        return {
+            "accounts": [mapping.account_row(a) for a in accounts],
+            "root": tried[-1] if accounts else "",
+            "tried": tried,
+        }
 
     def _load_source(self, params: dict[str, Any]) -> dict[str, Any]:
         kind = params.get("kind")
@@ -135,7 +143,9 @@ class Sidecar:
         return mapping.load_result("export", items)
 
     def _load_store(self, params: dict[str, Any]) -> dict[str, Any]:
-        accounts = config.discover_accounts(_xwechat_root())
+        # 与 scan_accounts 同一发现口径（docs/02 §1.2 root 注入，#13）——否则
+        # 扫到账号但加载 NO_ACCOUNT
+        accounts, _ = _discover_accounts(params.get("root"))
         account = _pick_account(accounts, params.get("account"))
         ks = keys.extract_keys(account.db_dir)          # KeyExtractError → KEY_NOT_FOUND
         work_dir = Path(os.environ.get("WXCHART_SIDECAR_WORK_DIR") or (_HERE / ".cache"))
@@ -520,8 +530,36 @@ def _locate_image(resolver: Any, msg: Any, decoded: dict[str, Path]) -> list[Any
                        size=_file_size(src), decoded=False, note="图片待解码")]
 
 
-def _xwechat_root() -> Path | None:
-    return Path(os.environ["WXCHART_XWECHAT_ROOT"]) if os.environ.get("WXCHART_XWECHAT_ROOT") else None
+def _discover_accounts(explicit: str | None) -> tuple[list[Any], list[str]]:
+    """账号目录发现（docs/02 §1.2 2026-11-09 #13，scan 与 load 共用同一口径）。
+
+    优先级：``WXCHART_XWECHAT_ROOT`` env（**操作者覆盖，最高**——测试/真机脚本靠它
+    隔离数据）→ 显式 ``root``（用户设置 data_root，只试它不回落）→ 常见位置
+    （``%APPDATA%\\Tencent\\xwechat_files``、``Documents\\WeChat Files``）→ 数据层默认
+    路径；**首个命中即停**。返回 ``(accounts, tried)``——``tried`` 为已尝试位置，
+    空结果时由前端展示可操作引导（A2 #30 不白屏口径）。
+    """
+    if os.environ.get("WXCHART_XWECHAT_ROOT"):
+        roots = [Path(os.environ["WXCHART_XWECHAT_ROOT"])]
+    elif isinstance(explicit, str) and explicit:
+        roots = [Path(explicit)]
+    else:
+        roots = []
+        appdata = os.environ.get("APPDATA")
+        userprofile = os.environ.get("USERPROFILE")
+        if appdata:
+            roots.append(Path(appdata) / "Tencent" / "xwechat_files")
+        if userprofile:
+            roots.append(Path(userprofile) / "Documents" / "WeChat Files")
+        roots.append(Path(DEFAULT_XWECHAT_ROOT))
+    tried: list[str] = []
+    accounts: list[Any] = []
+    for r in roots:
+        tried.append(str(r))
+        accounts = config.discover_accounts(r)
+        if accounts:
+            return accounts, tried
+    return [], tried
 
 
 def _pick_account(accounts: list[Any], prefer: Any) -> Any:

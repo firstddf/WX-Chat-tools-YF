@@ -37,12 +37,20 @@ pub async fn app_info(manager: State<'_, SidecarManager>) -> Result<AppInfo, App
     })
 }
 
-/// 转发通道③ `scan_accounts` → `{accounts:[{wxid,nickname,active,root}]}`
+/// 转发通道③ `scan_accounts` → `{accounts, root, tried}`（docs/02 §1.2 2026-11-09 #13）。
+/// `settings.data_root` 由**壳注入**为显式 `root`（手动设置的数据目录优先于自动发现；
+/// 空串不注入 → sidecar 走发现顺序）。
 #[tauri::command]
-pub async fn scan_accounts(manager: State<'_, SidecarManager>) -> Result<Value, AppError> {
-    manager
-        .call("scan_accounts", json!({}), DEFAULT_TIMEOUT)
-        .await
+pub async fn scan_accounts(
+    app: tauri::AppHandle,
+    manager: State<'_, SidecarManager>,
+) -> Result<Value, AppError> {
+    let mut params = json!({});
+    let data_root = crate::settings::load_for_app(&app)?.data_root;
+    if !data_root.is_empty() {
+        params["root"] = json!(data_root);
+    }
+    manager.call("scan_accounts", params, DEFAULT_TIMEOUT).await
 }
 
 /// `load_data` → sidecar `load_source` 透传（kind/account/out_dir/options 平铺）。
@@ -62,6 +70,11 @@ pub async fn load_data(
             let mut p = json!({ "kind": "store" });
             if let Some(a) = account.filter(|s| !s.is_empty()) {
                 p["account"] = json!(a);
+            }
+            // 显式数据目录注入（#13，与 scan_accounts 同口径——否则扫到加载 NO_ACCOUNT）
+            let data_root = crate::settings::load_for_app(&app)?.data_root;
+            if !data_root.is_empty() {
+                p["root"] = json!(data_root);
             }
             if let Some(o) = options {
                 p["options"] = o;

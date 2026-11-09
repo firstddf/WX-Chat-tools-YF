@@ -154,10 +154,19 @@ export interface AppInfo {
   sidecar: SidecarStatus;
 }
 
-/** 应用设置（docs/02 §2 2026-11-09 冻结：白名单两字段，缺省空串） */
+/** 应用设置（docs/02 §2 冻结：白名单字段，缺省空串；`data_root` 为 #13 增补） */
 export interface AppSettings {
   last_account: string;
   last_export_dir: string;
+  /** 微信数据目录：空串 = 自动发现（发现顺序见 docs/02 §1.2 scan_accounts） */
+  data_root: string;
+}
+
+/** scan_accounts 结果（docs/02 §1.2 #13）：root=命中目录（空=未命中），tried=已尝试位置 */
+export interface ScanAccountsResult {
+  accounts: Account[];
+  root?: string;
+  tried?: string[];
 }
 
 export type LoadParams =
@@ -176,7 +185,7 @@ export interface ExportParams {
 
 export interface Ipc {
   appInfo(): Promise<AppInfo>;
-  scanAccounts(): Promise<{ accounts: Account[] }>;
+  scanAccounts(): Promise<ScanAccountsResult>;
   loadData(params: LoadParams): Promise<LoadResult>;
   /** 图片按需解码（懒解码，docs/02 §2 `resolve_media`）：indexes = messages 的全量下标 */
   resolveMedia(indexes: number[]): Promise<ResolveMediaResult>;

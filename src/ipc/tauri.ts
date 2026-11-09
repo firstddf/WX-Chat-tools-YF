@@ -7,8 +7,8 @@ import {
   EVENT_PROGRESS, EVENT_SIDECAR_STATUS, PROTOCOL_VERSION,
 } from './types';
 import type {
-  Account, AppInfo, AppSettings, ExportParams, ExportResult, Ipc, LoadParams, LoadResult,
-  ProgressParams, ProtocolError, ResolveMediaResult, SidecarStatus,
+  AppInfo, AppSettings, ExportParams, ExportResult, Ipc, LoadParams, LoadResult,
+  ProgressParams, ProtocolError, ResolveMediaResult, ScanAccountsResult, SidecarStatus,
 } from './types';
 
 /** Tauri invoke 的拒绝值要么已是 ProtocolError 形状，要么包成 INTERNAL */
@@ -28,9 +28,10 @@ export class TauriIpc implements Ipc {
     }
   }
 
-  async scanAccounts(): Promise<{ accounts: Account[] }> {
+  async scanAccounts(): Promise<ScanAccountsResult> {
     try {
-      return await invoke<{ accounts: Account[] }>('scan_accounts');
+      // root 由壳从 settings.data_root 注入（#13），前端不传参
+      return await invoke<ScanAccountsResult>('scan_accounts');
     } catch (e) {
       throw asProtocolError(e);
     }
