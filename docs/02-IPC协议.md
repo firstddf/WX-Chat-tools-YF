@@ -136,13 +136,19 @@ media[{kind,name,path}], day_page`。
 
 ## 2. 通道①：前端 → Tauri（invoke 命令）
 
+> **invoke 参数键 = camelCase**（2026-11-09 真机实测修正）：Tauri v2 把 Rust 命令的
+> snake_case 形参映射为 camelCase 键（`out_path`→**`outPath`**、`out_dir`→**`outDir`**），
+> 单词参数同形（`kind`/`scope`/`path`/`indexes` 不变）。此前多 word 参数从未在真壳
+> 跑过（e2e 走 MockIpc 不校验线格式），`local-data-check.mjs` 首跑即撞出
+> `missing required key outPath`——`tauri.ts` 已按此修正；Rust 形参与下表语义不变。
+
 | cmd | args | resolves | 说明 |
 |---|---|---|---|
 | `app_info` | `{}` | `{name, version, protocol_version, sidecar:{state, protocol_version?}}` | 启动握手；壳校验 sidecar 协议主版本一致，不一致置 `state:"mismatch"` |
 | `scan_accounts` | `{}` | `{accounts:[...]}` | 转发通道③ |
-| `load_data` | `{kind, account?, out_dir?, options?}` | `{source, chats, messages, stats}` | **全量**返回（≈11k 条 / 数 MB）；期间 emit `data://progress`；`kind=export` 成功后 `out_dir` 注册进 PathScope **与 asset 协议 scope**（数据包内图片可显示） |
+| `load_data` | `{kind, account?, outDir?, options?}`（键 camelCase，见上注） | `{source, chats, messages, stats}` | **全量**返回（≈11k 条 / 数 MB）；期间 emit `data://progress`；`kind=export` 成功后 `out_dir` 注册进 PathScope **与 asset 协议 scope**（数据包内图片可显示） |
 | `resolve_media` | `{indexes:number[]}` | `{items:[{index, media:[Media,…]}]}` | 转发通道③ `resolve_media`（图片懒解码，超时 60s）；**新解码出的 `path` 同步加入 `open_path` 路径 scope 白名单**（否则点击打开报 `PATH_NOT_ALLOWED`） |
-| `export_messages` | `{format, scope?, out_path}` | `{path, count, bytes}` | `out_path` 由前端先经 `plugin:dialog\|save` 取得；`format:"bundle"` 时 scope 省略（传 null）、`out_path` 为**目录**（`plugin:dialog\|open` directory 模式）；bundle 成功后该目录注册进 PathScope **与 asset 协议 scope** |
+| `export_messages` | `{format, scope?, outPath}`（键 camelCase，见上注） | `{path, count, bytes}` | `outPath` 由前端先经 `plugin:dialog\|save` 取得；`format:"bundle"` 时 scope 省略（传 null）、`outPath` 为**目录**（`plugin:dialog\|open` directory 模式）；bundle 成功后该目录注册进 PathScope **与 asset 协议 scope** |
 | `open_path` | `{path}` | `{ok}` | opener 插件；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED` |
 | `reveal_path` | `{path}` | `{ok}` | 在资源管理器中定位 |
 | `doctor` | `{}` | 见 §1.2 | M-A4 |

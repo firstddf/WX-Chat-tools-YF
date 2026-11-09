@@ -41,7 +41,8 @@ export class TauriIpc implements Ipc {
       return await invoke<LoadResult>('load_data', {
         kind: params.kind,
         account: params.kind === 'store' ? (params.account ?? null) : null,
-        out_dir: params.kind === 'export' ? params.out_dir : null,
+        // Tauri 把 Rust snake_case 形参映射为 camelCase 键（docs/02 §2 2026-11-09 实测注）
+        outDir: params.kind === 'export' ? params.out_dir : null,
         options: params.kind === 'store' ? (params.options ?? null) : null,
       });
     } catch (e) {
@@ -64,7 +65,7 @@ export class TauriIpc implements Ipc {
         format: params.format,
         // bundle 不带 scope → null（壳 Value 收下，sidecar 校验非 null 即拒，docs/02 §1.2）
         scope: params.scope ?? null,
-        out_path: params.out_path,
+        outPath: params.out_path, // camelCase 键（docs/02 §2 2026-11-09 实测注）
       });
     } catch (e) {
       throw asProtocolError(e);
