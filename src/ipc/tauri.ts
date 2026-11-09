@@ -7,7 +7,7 @@ import {
   EVENT_PROGRESS, EVENT_SIDECAR_STATUS, PROTOCOL_VERSION,
 } from './types';
 import type {
-  AppInfo, AppSettings, ExportParams, ExportResult, Ipc, LoadParams, LoadResult,
+  AppInfo, AppSettings, DoctorResult, ExportParams, ExportResult, Ipc, LoadParams, LoadResult,
   ProgressParams, ProtocolError, ResolveMediaResult, ScanAccountsResult, SidecarStatus,
 } from './types';
 
@@ -68,6 +68,15 @@ export class TauriIpc implements Ipc {
         scope: params.scope ?? null,
         outPath: params.out_path, // camelCase 键（docs/02 §2 2026-11-09 实测注）
       });
+    } catch (e) {
+      throw asProtocolError(e);
+    }
+  }
+
+  async doctor(): Promise<DoctorResult> {
+    try {
+      // root 由壳从 settings.data_root 注入（#13 同口径），前端不传参
+      return await invoke<DoctorResult>('doctor');
     } catch (e) {
       throw asProtocolError(e);
     }

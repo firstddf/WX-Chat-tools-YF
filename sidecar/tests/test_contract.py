@@ -1252,6 +1252,89 @@ def test_scan_accounts_root_and_discovery() -> None:
             p2.stop()
 
 
+def test_doctor_dispatch_mocked() -> None:
+    """doctor（docs/02 §1.2 2026-11-09 #3）：mock 全绿路径（形状冻结）
+    + KEY_NOT_FOUND 路径（错误帧）+ NO_ACCOUNT 分支；store 查完即关。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+
+    class FakeChat:
+        message_count = 42
+
+    class FakeStore:
+        closed = False
+
+        def __init__(self, account, work_dir) -> None:
+            pass
+
+        def prepare(self, ks) -> list:
+            return [mock.Mock(rel="message/message.db", ok=True),
+                    mock.Mock(rel="session/session.db", ok=False)]
+
+        def close(self) -> None:
+            FakeStore.closed = True
+
+    account = mock.Mock(wxid="wxid_fake", username="wxid_fake",
+                        root=Path(r"C:\tmp\x"), db_dir=Path(r"C:\tmp\x\db"),
+                        last_active=12.0)
+    ks = mock.Mock(mode="config-cipher", pid=4242,
+                   keys={"message/message.db": b"\x00"}, missing=["session/session.db"])
+    with mock.patch.object(launcher, "config") as cfg, \
+            mock.patch.object(launcher, "keys") as keys_mod, \
+            mock.patch.object(launcher, "Store", FakeStore), \
+            mock.patch.object(launcher, "model") as model_mod:
+        cfg.discover_accounts.return_value = [account]
+        cfg.resolve_self_username.return_value = "wxid_fake"
+        keys_mod.extract_keys.return_value = ks
+        model_mod.load_contacts.return_value = {}
+        model_mod.load_chats.return_value = [FakeChat()]
+
+        result = sc.handle("doctor", {})
+
+    # 形状冻结（docs/02 §1.2）：顶层五键，key_sources 五键、dbs 两键
+    assert set(result.keys()) == {"version", "account", "key_sources", "dbs", "messages"}
+    assert result["version"] == WXCHART_VERSION
+    assert result["account"] == {"wxid": "wxid_fake", "root": str(Path(r"C:\tmp\x"))}
+    assert set(result["key_sources"].keys()) == {"mode", "pid", "hit", "total", "missing"}
+    assert result["key_sources"]["mode"] == "config-cipher"
+    assert result["key_sources"]["hit"] == 1 and result["key_sources"]["total"] == 2
+    assert result["key_sources"]["missing"] == ["session/session.db"], "missing 截前 8 条"
+    assert result["dbs"] == [{"name": "message/message.db", "ok": True},
+                             {"name": "session/session.db", "ok": False}], \
+        "部分库解密失败不报错，逐库 ok 呈现"
+    assert result["messages"] == 42, "消息数 = chats.message_count 求和（Tk 同口径）"
+    assert FakeStore.closed, "自检的 store 必须在 finally 关闭"
+    wire = json.dumps(result, ensure_ascii=False, default=str)
+    assert "keys" not in result["key_sources"] and "\\u0000" not in wire, \
+        "结果不含任何密钥值（docs/03 §5）"
+    assert buf.getvalue() == "", "doctor 不发 progress 通知"
+
+    # KEY_NOT_FOUND：extract_keys 抛 KeyExtractError → 错误帧（微信未运行）
+    ks_error = KeyExtractError("weixin-not-running",
+                               "Weixin.exe 未运行。请先登录微信（密钥只在登录后的进程内存中），再重试。")
+    stdin = io.StringIO(json.dumps({"id": 7, "method": "doctor", "params": {}}) + "\n")
+    out = io.StringIO()
+    with mock.patch.object(launcher, "config") as cfg, \
+            mock.patch.object(launcher, "keys") as keys_mod:
+        cfg.discover_accounts.return_value = [account]
+        keys_mod.extract_keys.side_effect = ks_error
+        rc = launcher.run(stdin, launcher.NdjsonWriter(out), sc)
+    assert rc == 0
+    frame = json.loads(out.getvalue().splitlines()[0])
+    assert frame["id"] == 7
+    assert frame["error"]["code"] == "KEY_NOT_FOUND"
+    assert "Weixin.exe 未运行" in frame["error"]["message"], "沿用 Tk 异常文案"
+
+    # NO_ACCOUNT：没有账号目录 → NO_ACCOUNT（A2 #30 引导口径）
+    with mock.patch.object(launcher, "config") as cfg:
+        cfg.discover_accounts.return_value = []
+        try:
+            sc.handle("doctor", {})
+            raise AssertionError("doctor 无账号应抛 NO_ACCOUNT")
+        except mapping.SidecarError as exc:
+            assert exc.code == "NO_ACCOUNT"
+
+
 # ---------------------------------------------------------------- 直跑入口
 
 def main() -> int:

@@ -19,6 +19,7 @@ pub fn run() {
             commands::load_data,
             commands::export_messages,
             commands::resolve_media,
+            commands::doctor,
             commands::open_path,
             commands::reveal_path,
             settings::get_settings,

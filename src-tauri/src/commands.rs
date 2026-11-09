@@ -2,7 +2,7 @@
 //! 命令名与参数名必须与 `src/ipc/tauri.ts` 逐字一致：
 //! `app_info` / `scan_accounts` / `load_data{kind,account,out_dir,options}` /
 //! `export_messages{format,scope,out_path}` / `resolve_media{indexes}` /
-//! `open_path{path}` / `reveal_path{path}`。
+//! `doctor{}` / `open_path{path}` / `reveal_path{path}`。
 //! 全部返回 `Result<T, AppError>`，拒绝值即前端 ProtocolError `{code,message,detail?}`。
 
 use std::path::Path;
@@ -13,8 +13,8 @@ use tauri::{Manager, State};
 
 use crate::error::AppError;
 use crate::sidecar::{
-    SidecarManager, SidecarStatus, DEFAULT_TIMEOUT, EXPORT_TIMEOUT, LOAD_TIMEOUT,
-    PROTOCOL_VERSION, RESOLVE_TIMEOUT,
+    SidecarManager, SidecarStatus, DEFAULT_TIMEOUT, DOCTOR_TIMEOUT, EXPORT_TIMEOUT,
+    LOAD_TIMEOUT, PROTOCOL_VERSION, RESOLVE_TIMEOUT,
 };
 
 /// `app_info` resolves（docs/02 §2）
@@ -173,6 +173,22 @@ pub async fn resolve_media(
         .await?;
     manager.register_media_from_items(&result);
     Ok(result)
+}
+
+/// `doctor` → 转发通道③ `doctor`（数据层自检，docs/02 §1.2/§2 2026-11-09 #3）。
+/// `settings.data_root` 由壳注入为 `root`（与 `scan_accounts`/`load_data` 同口径，#13）；
+/// 解密全库比默认 10s 长 → 自定 30s 超时（`DOCTOR_TIMEOUT`）。
+#[tauri::command]
+pub async fn doctor(
+    app: tauri::AppHandle,
+    manager: State<'_, SidecarManager>,
+) -> Result<Value, AppError> {
+    let mut params = json!({});
+    let data_root = crate::settings::load_for_app(&app)?.data_root;
+    if !data_root.is_empty() {
+        params["root"] = json!(data_root);
+    }
+    manager.call("doctor", params, DOCTOR_TIMEOUT).await
 }
 
 /// 打开路径（opener 插件）；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED`。

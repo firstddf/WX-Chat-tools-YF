@@ -36,6 +36,7 @@ __all__ = [
     "load_result",
     "export_result",
     "bundle_result",
+    "doctor_result",
     "to_error",
 ]
 
@@ -154,6 +155,34 @@ def bundle_result(path: Path | str, report: Any) -> dict[str, Any]:
         "count": int(getattr(report, "messages", 0) or 0),
         "bytes": total,
     }
+
+
+def doctor_result(account: Any, ks: Any, status: list[Any],
+                  messages: int | None) -> dict[str, Any]:
+    """doctor 自检的 result（docs/02 §1.2 2026-11-09 #3 冻结形状）。
+
+    - ``key_sources``：KeySet 概览（mode/pid/命中数/缺密钥库），**不含任何密钥值**
+      （docs/03 §5）；``missing`` 截前 8 条（同 Tk cmd_doctor 展示口径）；
+    - ``dbs``：逐库解密结果（部分失败不报错，``ok=false`` 由前端逐条呈现）；
+    - ``messages``：库可读时的消息总数（``load_chats`` 计数求和，Tk 同口径）；
+      读不出时为 None → 序列化时省略该键。
+    """
+    total = len(ks.keys) + len(ks.missing)
+    out: dict[str, Any] = {
+        "version": APP_VERSION,
+        "account": {"wxid": str(account.wxid), "root": str(account.root)},
+        "key_sources": {
+            "mode": str(ks.mode),
+            "pid": int(ks.pid),
+            "hit": len(ks.keys),
+            "total": total,
+            "missing": [str(m) for m in ks.missing[:8]],
+        },
+        "dbs": [{"name": str(s.rel), "ok": bool(s.ok)} for s in status],
+    }
+    if messages is not None:
+        out["messages"] = int(messages)
+    return out
 
 
 def _exc_text(exc: BaseException, fallback: str) -> str:

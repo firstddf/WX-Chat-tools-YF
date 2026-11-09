@@ -26,7 +26,7 @@ export interface ProtocolError {
 
 /** 侧边可注入的错误（MockIpc 测试用） */
 export type ErrorInjection = Partial<
-  Record<'loadData' | 'exportMessages' | 'scanAccounts' | 'appInfo' | 'resolveMedia', ErrorCode>
+  Record<'loadData' | 'exportMessages' | 'scanAccounts' | 'appInfo' | 'resolveMedia' | 'doctor', ErrorCode>
 >;
 
 // ---------------------------------------------------------------- 通道③ 数据形状（docs/02 §1.3）
@@ -117,6 +117,19 @@ export interface ResolveMediaResult {
   items: Array<{ index: number; media: Media[] }>;
 }
 
+/** `doctor` 自检结果（docs/02 §1.2 2026-11-09 #3 冻结形状） */
+export interface DoctorResult {
+  /** 数据层版本（wxchart.__version__） */
+  version: string;
+  account: { wxid: string; root: string };
+  /** 密钥概览（不含任何密钥值，docs/03 §5）；missing 截前 8 条 */
+  key_sources: { mode: string; pid: number; hit: number; total: number; missing: string[] };
+  /** 逐库解密结果；部分失败不报错，ok=false 由面板逐条呈现 */
+  dbs: Array<{ name: string; ok: boolean }>;
+  /** 消息总数；库不可读时省略（前端显示 —） */
+  messages?: number;
+}
+
 export interface PingResult {
   protocol_version: number;
   app_version: string;
@@ -190,6 +203,8 @@ export interface Ipc {
   /** 图片按需解码（懒解码，docs/02 §2 `resolve_media`）：indexes = messages 的全量下标 */
   resolveMedia(indexes: number[]): Promise<ResolveMediaResult>;
   exportMessages(params: ExportParams): Promise<ExportResult>;
+  /** 数据层自检（docs/02 §1.2 `doctor`）：账号/密钥/逐库解密/消息数 */
+  doctor(): Promise<DoctorResult>;
   openPath(path: string): Promise<{ ok: boolean }>;
   revealPath(path: string): Promise<{ ok: boolean }>;
   /** 读应用设置（docs/02 §2；文件缺失/损坏 → 默认空串） */

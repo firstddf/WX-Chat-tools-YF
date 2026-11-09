@@ -3,8 +3,8 @@
 import { deriveChats, deriveStats } from '../logic/derive';
 import { makeAccounts, makeMessages } from './fixtures';
 import type {
-  Account, AppInfo, AppSettings, ErrorInjection, ExportParams, ExportResult, Ipc, LoadParams,
-  LoadResult, Media, Message, ProgressParams, ProtocolError, ResolveMediaResult,
+  Account, AppInfo, AppSettings, DoctorResult, ErrorInjection, ExportParams, ExportResult, Ipc,
+  LoadParams, LoadResult, Media, Message, ProgressParams, ProtocolError, ResolveMediaResult,
   ScanAccountsResult, SidecarStatus,
 } from './types';
 import { PROTOCOL_VERSION } from './types';
@@ -174,6 +174,24 @@ export class MockIpc implements Ipc {
       : messages.length; // mock 不真筛，返回全量长度即可（断言看 calls）
     this.emitProgress({ phase: 'export', done: count, total: count, message: `导出 ${count} 条` });
     return { path: params.out_path, count, bytes: Math.max(count, 1) * 180 };
+  }
+
+  /** docs/02 §1.2 `doctor`：合成自检结果；进 `calls` 供断言 */
+  async doctor(): Promise<DoctorResult> {
+    this.calls.push({ method: 'doctor', params: {} });
+    await delay(this.latencyMs);
+    this.fail('doctor');
+    return {
+      version: '0.1.0',
+      account: { wxid: this.accounts[0]?.wxid ?? 'wxid_mock', root: 'C:/mock/xwechat_files' },
+      key_sources: { mode: 'config-cipher', pid: 4242, hit: 14, total: 14, missing: [] },
+      dbs: [
+        { name: 'message/message.db', ok: true },
+        { name: 'session/session.db', ok: true },
+        { name: 'contact/contact.db', ok: true },
+      ],
+      messages: this.messageCount,
+    };
   }
 
   async openPath(): Promise<{ ok: boolean }> {

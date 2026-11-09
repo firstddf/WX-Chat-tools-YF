@@ -477,6 +477,40 @@ test('数据目录 #13 手动设置 → 扫描注入 root + 状态回显 + 重�
   await expect(page.getByTestId('btn_auto_data_root')).toHaveCount(0);
 });
 
+// ---------------------------------------------------------------- 自检（docs/07 #3）
+
+test('自检 #3 管理页点自检 → 结果面板（每库 ✅/❌ + 消息数）；注入 KEY_NOT_FOUND 不崩', async ({ page }) => {
+  await gotoAndInstall(page);
+  await load(page);
+  await page.getByTestId('tab_manage').click();
+  const manage = page.getByTestId('page_manage');
+  await expect(manage.getByTestId('doctor_panel')).toHaveCount(0);
+
+  // 全绿路径：mock doctor → 面板出现，摘要含版本/账号/密钥命中/消息数，逐库 ✅
+  await manage.getByTestId('btn_doctor').click();
+  await expect(manage.getByTestId('doctor_panel')).toBeVisible();
+  await expect(manage.getByTestId('doctor_summary')).toContainText('自检 v0.1.0');
+  await expect(manage.getByTestId('doctor_summary')).toContainText('密钥 14/14');
+  await expect(manage.getByTestId('doctor_summary')).toContainText('条');
+  await expect(manage.getByTestId('doctor_db')).toHaveCount(3);
+  await expect(manage.getByTestId('doctor_db').first()).toContainText('✅');
+  await expect(manage.getByTestId('doctor_error')).toHaveCount(0);
+
+  // 失败路径：注入 KEY_NOT_FOUND（微信未运行）→ 面板显示文案、应用不白屏（A2 #30 口径）
+  await page.evaluate(async () => {
+    const entries = performance.getEntriesByType('resource').map((e) => e.name);
+    const url = entries.find((n) => /\/src\/ipc\/mock\.ts/.test(n)) ?? '/src/ipc/mock.ts';
+    const mod = await import(url);
+    mod.MockIpc.prototype.doctor = async () => {
+      throw mod.protocolError('KEY_NOT_FOUND');
+    };
+  });
+  await manage.getByTestId('btn_doctor').click();
+  await expect(manage.getByTestId('doctor_error')).toContainText('微信');
+  await expect(manage.getByTestId('doctor_summary')).toHaveCount(0);
+  await expect(page.getByTestId('page_manage')).toBeVisible(); // 不白屏
+});
+
 // ---------------------------------------------------------------- A2 #26
 
 test('A2 #26 管理页「在筛选中查找」→ 切页 + entry_chat 预填 + 结果只剩该会话', async ({ page }) => {

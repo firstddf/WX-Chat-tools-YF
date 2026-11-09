@@ -2,7 +2,7 @@
 """通道③ sidecar 启动器：stdin/stdout NDJSON 循环 + 方法分发（docs/02 §1、docs/03）。
 
 - 一行一个 JSON（UTF-8）；stdout 只出协议帧，stderr 只出日志（`[level] ...`）；
-- 方法：ping / scan_accounts / load_source / resolve_media / export / stop；
+- 方法：ping / scan_accounts / load_source / resolve_media / export / doctor / stop；
   `resolve_media` 为图片**懒解码**（docs/02 §1.2 2026-11-07 增补）：加载期图片只定位，
   显示/导出时按需解码；
 - 数据层只读引用 ../wxchart-tool/src/wxchart（不改 Tk 仓库）；
@@ -96,6 +96,9 @@ class Sidecar:
             return self._exclusive(self._resolve_media, indexes)
         if method == "export":
             return self._exclusive(self._export, params)
+        if method == "doctor":
+            # 自检要解密全库（docs/07 #3）：与 load/export 共用互斥锁，冲突回 EXPORTING_BUSY
+            return self._exclusive(self._doctor, params)
         if method == "stop":
             return {"ok": True}
         raise SidecarError("INTERNAL", f"未知方法: {method}")
@@ -306,6 +309,35 @@ class Sidecar:
         except Exception as exc:  # noqa: BLE001
             _log("warn", f"图片密钥初始化失败（图片可能未解密）: {exc}")
         return resolver
+
+    def _doctor(self, params: dict[str, Any]) -> dict[str, Any]:
+        """数据层自检（docs/02 §1.2 2026-11-09 #3）：账号 → 密钥 → 逐库解密 → 消息数。
+
+        复用 Tk ``cli.cmd_doctor`` 的数据部分（不 import argparse 命令行壳）；
+        账号发现与 scan/load 同口径（``root`` 注入，#13）。**部分库解密失败不报错**
+        ——``dbs[].ok=false`` 逐库呈现；消息数仅在库可读时给出（读不出省略该键）。
+        独立开 store、查完即关：**不改动** sidecar 已加载的内存数据
+        （``_items``/``_store_ctx`` 原样）。
+        """
+        accounts, _ = _discover_accounts(params.get("root"))
+        account = _pick_account(accounts, None)        # 空 → NO_ACCOUNT
+        ks = keys.extract_keys(account.db_dir)         # KeyExtractError → KEY_NOT_FOUND
+        work_dir = Path(os.environ.get("WXCHART_SIDECAR_WORK_DIR") or (_HERE / ".cache"))
+        store = Store(account, work_dir)
+        try:
+            status = store.prepare(ks)
+            messages: int | None = None
+            if any(s.ok for s in status):
+                try:
+                    store.__dict__["_self_username"] = config.resolve_self_username(account)
+                    contacts = model.load_contacts(store)
+                    chats = model.load_chats(store, contacts)
+                    messages = sum(c.message_count for c in chats)
+                except Exception as exc:  # noqa: BLE001 - 库可读性不足：省略 messages，不报错
+                    _log("warn", f"doctor 消息数读取失败（省略 messages）: {exc}")
+        finally:
+            store.close()
+        return mapping.doctor_result(account, ks, status, messages)
 
     def _subset(self, scope: dict[str, Any]) -> list[Any]:
         assert self._items is not None

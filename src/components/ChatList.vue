@@ -3,7 +3,7 @@
 // 本地数据（docs/06 Phase 1）：「导出本地数据包」bundle 全量导出 + 「打开本地数据」回读。
 import { computed, inject, ref } from 'vue';
 import { pickDir } from '../ipc/dialog';
-import type { ProtocolError } from '../ipc/types';
+import type { DoctorResult, ProtocolError } from '../ipc/types';
 import { createSelection, STORE_KEY } from '../state/store';
 import { filterIndexed } from '../logic/filter';
 import MessageList from './MessageList.vue';
@@ -17,6 +17,9 @@ const selectedId = ref('');
 const notice = ref('');
 const exporting = ref(false); // bundle 导出中（按钮禁用 + 进度行）
 const bundlePath = ref(''); // 最近一次数据包根目录（「打开导出目录」用）
+const doctor = ref<DoctorResult | null>(null); // 自检结果（面板）
+const doctorError = ref(''); // 自检失败文案（失败不崩，A2 #30 口径）
+const doctorRunning = ref(false);
 const browseSelection = createSelection(false); // 纯浏览：选择 API 恒为空（A1 #6）
 
 const visibleChats = computed(() => {
@@ -87,6 +90,21 @@ function revealBundle(): void {
   void store.ipc.revealPath(bundlePath.value).catch(() => {
     notice.value = '⚠ 打开导出目录失败';
   });
+}
+
+/** 数据层自检（docs/02 §1.2 `doctor`，docs/07 #3）：账号/密钥/逐库解密/消息数 */
+async function runDoctor(): Promise<void> {
+  if (doctorRunning.value) return;
+  doctorRunning.value = true;
+  doctor.value = null;
+  doctorError.value = '';
+  try {
+    doctor.value = await store.ipc.doctor();
+  } catch (e) {
+    doctorError.value = asError(e).message; // KEY_NOT_FOUND/NO_ACCOUNT 等：展示文案不崩
+  } finally {
+    doctorRunning.value = false;
+  }
 }
 
 function refresh(): void {
@@ -168,6 +186,15 @@ function toFilter(): void {
           打开本地数据
         </button>
         <button
+          type="button"
+          class="f-btn"
+          data-testid="btn_doctor"
+          :disabled="doctorRunning"
+          @click="runDoctor"
+        >
+          {{ doctorRunning ? '自检中…' : '自检' }}
+        </button>
+        <button
           v-if="bundlePath"
           type="button"
           class="f-btn"
@@ -180,6 +207,28 @@ function toFilter(): void {
       </div>
       <div class="f-row" v-if="notice || exportProgress">
         <span class="f-count" data-testid="manage_notice">{{ exportProgress || notice }}</span>
+      </div>
+      <!-- 自检结果面板（docs/07 #3）：每库 ✅/❌ + 消息数；失败只显示文案不崩 -->
+      <div class="f-row" v-if="doctorError || doctor" data-testid="doctor_panel">
+        <span class="f-count" data-testid="doctor_error" v-if="doctorError">⚠ {{ doctorError }}</span>
+        <template v-if="doctor">
+          <span class="f-count" data-testid="doctor_summary">
+            自检 v{{ doctor.version }} · 账号 {{ doctor.account.wxid }} ·
+            密钥 {{ doctor.key_sources.hit }}/{{ doctor.key_sources.total }}
+            <template v-if="doctor.key_sources.missing.length > 0">
+              （缺：{{ doctor.key_sources.missing.join('、') }}）
+            </template>
+            · 消息 {{ doctor.messages ?? '—' }} 条
+          </span>
+          <span
+            v-for="db in doctor.dbs"
+            :key="db.name"
+            class="f-count"
+            data-testid="doctor_db"
+          >
+            {{ db.ok ? '✅' : '❌' }} {{ db.name }}
+          </span>
+        </template>
       </div>
     </div>
 

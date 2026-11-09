@@ -10,7 +10,7 @@
 //!   帧立即转发为通道②事件 `data://progress`；
 //! - 启动 5s 内 `ping` → 校验 `protocol_version == 1` → `ready`（不一致 `mismatch`）；
 //! - 单请求串行（互斥锁包住 发送+等待，与 sidecar 串行语义一致）；
-//!   超时：load 300s / export 900s / resolve_media 60s / 其它 10s → `SIDECAR_TIMEOUT`；
+//!   超时：load 300s / export 900s / resolve_media 60s / doctor 30s / 其它 10s → `SIDECAR_TIMEOUT`；
 //! - 崩溃：自动重启 1 次（500ms 退避，emit `restarted`）→ 再失败 `failed`；
 //! - 停止：发 `stop` → 等 EOF/2s → 仍活则 kill（防僵尸）。
 
@@ -55,6 +55,9 @@ pub const RESOLVE_TIMEOUT: Duration = Duration::from_secs(60);
 /// 2026-11-07 二轮：图片改懒解码后，export 写出前要为导出子集补齐未解码图片
 /// （冷缓存全量 ≈6.9min）→ 300s 会顶穿，放宽到 900s，期间 sidecar 发 progress 通知。
 pub const EXPORT_TIMEOUT: Duration = Duration::from_secs(900);
+/// doctor（数据层自检）超时 30s（docs/02 §2 / docs/07 #3）：
+/// 要为全部库解密（冷缓存首解可达数十秒），DEFAULT 10s 不够。
+pub const DOCTOR_TIMEOUT: Duration = Duration::from_secs(30);
 /// 崩溃重启退避 500ms（docs/03 §3）
 const RESTART_BACKOFF: Duration = Duration::from_millis(500);
 /// stop 后等 EOF 的上限 2s（docs/03 §3）

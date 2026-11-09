@@ -8,7 +8,7 @@
 
 | | `wxchart-tool`（Tk 版） | `wxchart-tauri`（本项目，Phase 2A） |
 |---|---|---|
-| 状态 | **单独保留**，继续可用、继续修 bug | **M-A2/M-A3 已收口，M-A4 打包主体完成**（2026-11-07）；**2026-11-09 三轮增量**：本地数据 Phase 1（bundle 导出/回读，真机 15/15）、`get_settings` 账号记忆（真机 6/6）、数据目录自动发现/手动设置（真机 7/7）；测试 **281 项全绿**（契约 28 + Tk 91 + Vitest 125 + Playwright 37）。余干净虚机冒烟/UI 级导出真机/杀软白名单 + Backlog P1（doctor、Phase 2 体验项，见 [docs/07](docs/07-施工计划清单.md)） |
+| 状态 | **单独保留**，继续可用、继续修 bug | **M-A2/M-A3 已收口，M-A4 打包主体完成**（2026-11-07）；**2026-11-09 四轮增量**：本地数据 Phase 1（bundle 导出/回读，真机 15/15）、`get_settings` 账号记忆（真机 6/6）、数据目录自动发现/手动设置（真机 7/7）、`doctor` 数据层自检（协议→sidecar→壳→管理页面板，真机两种留下轮）；测试 **285 项全绿**（契约 29 + Tk 91 + Vitest 127 + Playwright 38）。余干净虚机冒烟/UI 级导出真机/杀软白名单 + Backlog P1（Phase 2 体验项，见 [docs/07](docs/07-施工计划清单.md)） |
 | 界面 | tkinter + Canvas 自绘 | HTML/CSS/JS（WebView2 合成器渲染） |
 | 运行时 | 需要本机 Python | 单安装包，最终无 Python |
 | 数据层 | `src/wxchart` 同一份实现 | **直接复用**（sidecar 调用），后迁 Rust |
