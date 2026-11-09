@@ -8,6 +8,12 @@
 > 改为「加载期**只定位**、显示/导出时**按需解码**」——大账号首解 4700+ 图 ≈6.9 分钟
 > 顶穿 300s `LOAD_TIMEOUT`（见 docs/05），字段形状不变，仅 `media[].decoded/path`
 > 在解码完成前为 `false/""`。
+>
+> **2026-11-09 增补（v1 内兼容扩展，不递增版本）**：`export` 新增 `format:"bundle"`
+> （**本地数据包**，docs/06 Phase 1）——全量复用 Tk `exporter.export()` 产出
+> HTML 站点 + 附件副本 + `.wxchart-state.json` + 导出报告，可被 `load_source kind=export`
+> 回读；**不带 scope、`out_path` 为目录**；配套 `export_messages` 命令在 bundle 成功后
+> 把数据包根注册进 PathScope **与 asset 协议 scope**（包内图片缩略图可显示）。
 
 ## 0. 三层通信总览
 
@@ -49,7 +55,7 @@
 | `scan_accounts` | `{}` | `{accounts:[{wxid, nickname, active, root}]}` | `config.discover_accounts`；`active` 为 unix 秒，`nickname` M-A1 暂回显 wxid（M-A4 doctor 接 contact 显示名） |
 | `load_source` | `{kind:"store", account, options?:{resolve_media?:bool}}` 或 `{kind:"export", out_dir}` | `{source, chats, messages, stats}`（形状见 §1.3） | `guidata.load_from_store` / `load_from_export_dir`；`resolve_media=true` 时挂 MediaResolver：**文件/视频/语音照常解析，图片只定位不解码**（`media[].decoded=false`、`path=""`，name 为 `.dat` 文件名或 `md5.dat`；缓存已有解码产物的直接回填 `decoded=true`）——懒解码，解码由 `resolve_media` 方法按需完成（2026-11-07：加载期全量解码大账号 4700+ 图 ≈6.9min 顶穿 300s 超时） |
 | `resolve_media` | `{indexes:[int,…]}`（`load_source` 结果 `messages` 的下标，与 sidecar 内存 `self._items` 同序） | `{items:[{index, media:[Media,…]}]}` | **按需解码图片（懒解码）**：对每条下标对应的 `raw` 消息重跑 `MediaResolver.resolve`，`media` 形状同 §1.3；与 `load_source`/`export` 共用互斥锁（冲突 `EXPORTING_BUSY`）；未加载 → `SOURCE_UNAVAILABLE`；已加载但本次未挂 resolver（`resolve_media=false` 或 export 来源）→ **原样返回**（前端据此停止重试）；下标非法/越界 → `INTERNAL` |
-| `export` | `{format:"json"\|"csv", scope, out_path}` | `{path, count, bytes}` | `guidata.to_records/write_json/write_csv`；**作用于已加载的内存数据**（D3），未先 `load_source` → `SOURCE_UNAVAILABLE` |
+| `export` | `{format:"json"\|"csv", scope, out_path}` 或 `{format:"bundle", out_path}`（bundle 见下） | `{path, count, bytes}` | json/csv：`guidata.to_records/write_json/write_csv`，**作用于已加载的内存数据**（D3），未先 `load_source` → `SOURCE_UNAVAILABLE`；bundle：**本地数据包**（见下），同一互斥锁与未加载口径 |
 | `doctor` | `{}` | `{version, account?, key_sources, dbs:[{name, ok}], messages?}` | `cli doctor`（M-A4） |
 | `stop` | `{}` | `{ok:true}` | 优雅退出（随后 EOF） |
 
@@ -63,6 +69,22 @@
 {"type":"indexes", "indexes":[0,5,9]}              // 多选：前端选中项的下标
 {"type":"filter",  "filter": {...FilterSpec}}       // 导出全部匹配
 ```
+
+`format:"bundle"`（**本地数据包**，2026-11-09 增补；Phase 1 全量，选择性数据包留 docs/06 Phase 3）：
+
+```jsonc
+{"format":"bundle", "out_path":"D:\\本地数据\\wxid_xxx"}   // 目录；不带 scope（scope 传 null → INTERNAL）
+```
+
+- 产出 = `exporter.export()` 原样（HTML 站点 + 附件副本 + `.wxchart-state.json` +
+  `导出报告.json`，三方格式一致）→ `load_source {kind:"export", out_dir}` 可回读；
+- **仅扫描（store）来源可打包**：sidecar 持有账号/KeySet/会话清单，打包时重开解密库
+  （缓存命中不解密）并挂**真实** MediaResolver（同 Tk `start_export`，附件照常解码复制）；
+  导出目录来源回读后再打包 → `INTERNAL`；未加载 → `SOURCE_UNAVAILABLE`；
+- 附件缺失/复制失败只记入 `导出报告.json`（`media-missing`/`media-copy-failed`），不中断导出；
+- result `{path, count, bytes}`：path=数据包根目录、count=`导出报告.messages`、
+  bytes=目录总字节数（遍历求和）；期间 progress `phase:"export_bundle"`
+  （exporter 的 pct 0–100 → `done/total`，message 原样）。
 
 ### 1.3 共享数据形状
 
@@ -118,9 +140,9 @@ media[{kind,name,path}], day_page`。
 |---|---|---|---|
 | `app_info` | `{}` | `{name, version, protocol_version, sidecar:{state, protocol_version?}}` | 启动握手；壳校验 sidecar 协议主版本一致，不一致置 `state:"mismatch"` |
 | `scan_accounts` | `{}` | `{accounts:[...]}` | 转发通道③ |
-| `load_data` | `{kind, account?, out_dir?, options?}` | `{source, chats, messages, stats}` | **全量**返回（≈11k 条 / 数 MB）；期间 emit `data://progress` |
+| `load_data` | `{kind, account?, out_dir?, options?}` | `{source, chats, messages, stats}` | **全量**返回（≈11k 条 / 数 MB）；期间 emit `data://progress`；`kind=export` 成功后 `out_dir` 注册进 PathScope **与 asset 协议 scope**（数据包内图片可显示） |
 | `resolve_media` | `{indexes:number[]}` | `{items:[{index, media:[Media,…]}]}` | 转发通道③ `resolve_media`（图片懒解码，超时 60s）；**新解码出的 `path` 同步加入 `open_path` 路径 scope 白名单**（否则点击打开报 `PATH_NOT_ALLOWED`） |
-| `export_messages` | `{format, scope, out_path}` | `{path, count, bytes}` | `out_path` 由前端先经 `plugin:dialog\|save` 取得 |
+| `export_messages` | `{format, scope?, out_path}` | `{path, count, bytes}` | `out_path` 由前端先经 `plugin:dialog\|save` 取得；`format:"bundle"` 时 scope 省略（传 null）、`out_path` 为**目录**（`plugin:dialog\|open` directory 模式）；bundle 成功后该目录注册进 PathScope **与 asset 协议 scope** |
 | `open_path` | `{path}` | `{ok}` | opener 插件；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED` |
 | `reveal_path` | `{path}` | `{ok}` | 在资源管理器中定位 |
 | `doctor` | `{}` | 见 §1.2 | M-A4 |

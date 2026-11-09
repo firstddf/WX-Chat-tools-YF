@@ -159,8 +159,10 @@ export type LoadParams =
   | { kind: 'export'; out_dir: string };
 
 export interface ExportParams {
-  format: 'json' | 'csv';
-  scope: Scope;
+  /** bundle = 本地数据包（docs/02 §1.2 2026-11-09：全量、不带 scope、out_path 为目录） */
+  format: 'json' | 'csv' | 'bundle';
+  /** json/csv 必填；bundle 不带（传 undefined → 壳转 null，sidecar 拒绝非 null） */
+  scope?: Scope;
   out_path: string;
 }
 

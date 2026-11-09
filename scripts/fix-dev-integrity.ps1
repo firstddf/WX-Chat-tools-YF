@@ -26,6 +26,16 @@ $targets = @(
 $fixed = 0
 foreach ($t in $targets) {
     if (-not (Test-Path $t)) { continue }
+    # 2026-11-09：已是 Medium（显式或继承）就跳过重写——本工作区由转移包解压而来，
+    # 目录 ACL 只有 Modify 没有 WRITE_OWNER，/setintegritylevel 会逐目录 Access denied
+    # （全树上千对象，逐个授权不可行）；而脚本的目标状态就是「Medium IL」，
+    # 状态已满足时重写是冗余动作。仍有 Low 标签时照旧 /T 重写（原语义不变）。
+    $label = (& icacls $t | Select-String 'Mandatory Label') -join ''
+    if ($label -match 'Medium Mandatory Level') {
+        Write-Host ">>> 已是 Medium IL（跳过重写）: $t"
+        $fixed++
+        continue
+    }
     Write-Host ">>> 设置 Medium IL: $t"
     # (OI)(CI) 让后续 cargo 新建的文件/子目录继承 Medium，而不是工作区根的 Low
     & icacls $t /setintegritylevel '(OI)(CI)Medium' /T | Out-Host

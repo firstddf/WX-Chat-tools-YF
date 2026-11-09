@@ -150,7 +150,14 @@ export class MockIpc implements Ipc {
     await delay(this.latencyMs);
     this.fail('exportMessages');
     const messages = this.cache.get(`store:${this.messageCount}`) ?? this.messagesFor('store');
-    const count = params.scope.type === 'indexes'
+    // bundle = 本地数据包（全量，docs/02 §1.2）：count 回全量、进度 phase 对齐 sidecar
+    if (params.format === 'bundle') {
+      this.emitProgress({
+        phase: 'export_bundle', done: 100, total: 100, message: '导出数据包 100%',
+      });
+      return { path: params.out_path, count: messages.length, bytes: Math.max(messages.length, 1) * 180 };
+    }
+    const count = params.scope?.type === 'indexes'
       ? params.scope.indexes.length
       : messages.length; // mock 不真筛，返回全量长度即可（断言看 calls）
     this.emitProgress({ phase: 'export', done: count, total: count, message: `导出 ${count} 条` });

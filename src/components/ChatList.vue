@@ -1,6 +1,9 @@
 <script setup lang="ts">
 // 聊天数据管理页（A2 #27/#28/#29/#30 的载体）：会话树 + 搜索 + 浏览视图（纯浏览，无勾选）。
+// 本地数据（docs/06 Phase 1）：「导出本地数据包」bundle 全量导出 + 「打开本地数据」回读。
 import { computed, inject, ref } from 'vue';
+import { pickDir } from '../ipc/dialog';
+import type { ProtocolError } from '../ipc/types';
 import { createSelection, STORE_KEY } from '../state/store';
 import { filterIndexed } from '../logic/filter';
 import MessageList from './MessageList.vue';
@@ -12,6 +15,8 @@ const emit = defineEmits<{ 'to-filter': [chatId: string] }>();
 const search = ref('');
 const selectedId = ref('');
 const notice = ref('');
+const exporting = ref(false); // bundle 导出中（按钮禁用 + 进度行）
+const bundlePath = ref(''); // 最近一次数据包根目录（「打开导出目录」用）
 const browseSelection = createSelection(false); // 纯浏览：选择 API 恒为空（A1 #6）
 
 const visibleChats = computed(() => {
@@ -38,6 +43,51 @@ const summary = computed(() => {
 const sourceLabel = computed(() =>
   data.source ? `来源：${data.source === 'store' ? '扫描' : '导出目录'}` : '',
 );
+
+/** bundle 导出中的进度行（复用 data://progress，docs/07 P0 步骤 4） */
+const exportProgress = computed(() =>
+  exporting.value && data.progress ? `导出中… ${data.progress.message}` : '',
+);
+
+function asError(e: unknown): ProtocolError {
+  if (e && typeof e === 'object' && 'code' in e && 'message' in e) return e as ProtocolError;
+  return { code: 'INTERNAL', message: '内部错误', detail: String(e) };
+}
+
+/** 导出本地数据包（format=bundle，全量；docs/02 §1.2 / docs/06 Phase 1） */
+async function exportBundle(): Promise<void> {
+  if (exporting.value) return;
+  const dir = await pickDir();
+  if (!dir) return;
+  exporting.value = true;
+  notice.value = '';
+  try {
+    const r = await store.exportMessages({ format: 'bundle', out_path: dir });
+    bundlePath.value = r.path;
+    notice.value = `已导出数据包 ${r.count} 条 → ${r.path}`;
+  } catch (e) {
+    notice.value = `⚠ ${asError(e).message}`;
+  } finally {
+    exporting.value = false;
+  }
+}
+
+/** 打开本地数据：选目录 → load {kind:"export"}，复用全部浏览/筛选链路 */
+async function openLocal(): Promise<void> {
+  const dir = await pickDir();
+  if (!dir) return;
+  notice.value = '';
+  await store.load({ kind: 'export', out_dir: dir });
+  // 成败由 store 写入的 data.error / summary / sourceLabel 展示（不另设错误条）
+}
+
+/** 数据包导出完成后的「打开导出目录」（复用 reveal_path，scope 已由壳放行） */
+function revealBundle(): void {
+  if (!bundlePath.value) return;
+  void store.ipc.revealPath(bundlePath.value).catch(() => {
+    notice.value = '⚠ 打开导出目录失败';
+  });
+}
 
 function refresh(): void {
   notice.value = '';
@@ -99,10 +149,37 @@ function toFilter(): void {
         <button type="button" class="f-btn" data-testid="btn_to_filter" @click="toFilter">
           在筛选中查找
         </button>
+        <span class="f-sep"></span>
+        <button
+          type="button"
+          class="f-btn"
+          data-testid="btn_export_bundle"
+          :disabled="exporting"
+          @click="exportBundle"
+        >
+          导出本地数据包
+        </button>
+        <button
+          type="button"
+          class="f-btn"
+          data-testid="btn_open_local"
+          @click="openLocal"
+        >
+          打开本地数据
+        </button>
+        <button
+          v-if="bundlePath"
+          type="button"
+          class="f-btn"
+          data-testid="btn_reveal_bundle"
+          @click="revealBundle"
+        >
+          打开导出目录
+        </button>
         <span class="f-count" data-testid="lbl_source">{{ sourceLabel }}</span>
       </div>
-      <div class="f-row" v-if="notice">
-        <span class="f-count" data-testid="manage_notice">{{ notice }}</span>
+      <div class="f-row" v-if="notice || exportProgress">
+        <span class="f-count" data-testid="manage_notice">{{ exportProgress || notice }}</span>
       </div>
     </div>
 

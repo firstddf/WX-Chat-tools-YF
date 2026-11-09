@@ -62,7 +62,8 @@ export class TauriIpc implements Ipc {
     try {
       return await invoke<ExportResult>('export_messages', {
         format: params.format,
-        scope: params.scope,
+        // bundle 不带 scope → null（壳 Value 收下，sidecar 校验非 null 即拒，docs/02 §1.2）
+        scope: params.scope ?? null,
         out_path: params.out_path,
       });
     } catch (e) {

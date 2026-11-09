@@ -93,6 +93,8 @@ const FIXTURE_DAYS = new Set(FIXTURE_MESSAGES.map((m) => m.day)).size;
 
 interface WindowWithHooks extends Window {
   __exports?: unknown[];
+  __loads?: unknown[];
+  __reveals?: string[];
   __opened?: string[];
 }
 
@@ -298,7 +300,144 @@ test('A2 #25 勾选 + 导出：保存路径 + exportMessages 参数 scope.indexe
   expect(all[1]!.out_path).toBe('全部匹配.csv');
 });
 
-// ---------------------------------------------------------------- A2 #26
+// ---------------------------------------------------------------- 本地数据（docs/06 Phase 1，e2e +3）
+
+/**
+ * 本地数据测试夹具：loadData 记参数并回 source=export（回读场景）、
+ * exportMessages 记参数（bundle 不带 scope）、revealPath 记路径。
+ */
+async function installLocalData(page: Page, messages: Message[], chats: Chat[]): Promise<void> {
+  await page.evaluate(
+    async ({ messages, chats }: { messages: Message[]; chats: Chat[] }) => {
+      const w = window as WindowWithHooks;
+      w.__exports = [];
+      w.__loads = [];
+      w.__reveals = [];
+      const entries = performance.getEntriesByType('resource').map((e) => e.name);
+      const url = entries.find((n) => /\/src\/ipc\/mock\.ts/.test(n)) ?? '/src/ipc/mock.ts';
+      const mod = await import(url);
+      const stats = {
+        messages: messages.length,
+        chats: chats.length,
+        media: messages.reduce((n, m) => n + m.media.length, 0),
+        first_ts: messages[0]?.ts ?? 0,
+        last_ts: messages[messages.length - 1]?.ts ?? 0,
+      };
+      mod.MockIpc.prototype.loadData = async (params: unknown) => {
+        w.__loads!.push(params);
+        const kind = (params as { kind?: string }).kind;
+        return {
+          source: kind === 'export' ? 'export' : 'store',
+          chats,
+          messages,
+          stats,
+        };
+      };
+      mod.MockIpc.prototype.exportMessages = async (params: {
+        format: string;
+        scope?: { type: string };
+        out_path: string;
+      }) => {
+        w.__exports!.push(params);
+        return { path: params.out_path, count: messages.length, bytes: messages.length * 180 };
+      };
+      mod.MockIpc.prototype.revealPath = async (path: string) => {
+        w.__reveals!.push(path);
+        return { ok: true };
+      };
+    },
+    { messages, chats },
+  );
+}
+
+async function localCalls(page: Page): Promise<{
+  exports: unknown[];
+  loads: unknown[];
+  reveals: string[];
+}> {
+  return page.evaluate(() => {
+    const w = window as WindowWithHooks;
+    return { exports: w.__exports ?? [], loads: w.__loads ?? [], reveals: w.__reveals ?? [] };
+  });
+}
+
+async function gotoLocal(page: Page): Promise<void> {
+  await page.goto('/');
+  await installLocalData(page, FIXTURE_MESSAGES, FIXTURE_CHATS);
+}
+
+test('本地数据 #1 导出本地数据包：bundle 参数（无 scope、目录 out_path）+ 完成提示 + 打开导出目录', async ({
+  page,
+}) => {
+  await gotoLocal(page);
+  await load(page);
+  await page.getByTestId('tab_manage').click();
+  const manage = page.getByTestId('page_manage');
+
+  // 浏览器 dev 的目录选择回固定路径（ipc/dialog.ts pickDir）
+  await manage.getByTestId('btn_export_bundle').click();
+  await expect(manage.getByTestId('manage_notice')).toContainText('已导出数据包 8 条 → C:/mock/local-data');
+
+  const { exports } = await localCalls(page);
+  const calls = exports as Array<{ format: string; scope?: unknown; out_path: string }>;
+  expect(calls).toHaveLength(1);
+  expect(calls[0]!.format).toBe('bundle');
+  expect(calls[0]!.out_path).toBe('C:/mock/local-data');
+  expect(calls[0]!.scope, 'bundle 不带 scope（docs/02 §1.2）').toBeUndefined();
+
+  // 完成后出现「打开导出目录」→ revealPath 收到数据包根
+  //（注意：localCalls 是 evaluate 的结构化快照，必须点击**后**再取）
+  await expect(manage.getByTestId('btn_reveal_bundle')).toBeVisible();
+  await manage.getByTestId('btn_reveal_bundle').click();
+  const after = await localCalls(page);
+  expect(after.reveals).toEqual(['C:/mock/local-data']);
+});
+
+test('本地数据 #2 打开本地数据：load kind=export 参数 + 来源：导出目录（两页都显示）', async ({
+  page,
+}) => {
+  await gotoLocal(page);
+  await load(page);
+  await page.getByTestId('tab_manage').click();
+  const manage = page.getByTestId('page_manage');
+
+  await manage.getByTestId('btn_open_local').click();
+  await expect(manage.getByTestId('lbl_source')).toHaveText('来源：导出目录');
+  await expect(manage.getByTestId('lbl_summary')).toContainText(
+    `${FIXTURE_CHATS.length} 个会话 · ${FIXTURE_MESSAGES.length} 条消息`,
+  );
+
+  const { loads } = await localCalls(page);
+  const localLoads = loads as Array<{ kind: string; out_dir?: string }>;
+  const local = localLoads.find((l) => l.kind === 'export');
+  expect(local, '应发起 load {kind:"export"}').toBeTruthy();
+  expect(local!.out_dir).toBe('C:/mock/local-data');
+
+  // 筛选页状态行同源展示（docs/02 §2 load_data kind=export → statusText 来源段）
+  await page.getByTestId('tab_filter').click();
+  await expect(status(page)).toContainText('来源：导出目录');
+  await expect(status(page)).toContainText(`共 ${FIXTURE_MESSAGES.length} 条消息`);
+});
+
+test('本地数据 #3 回读数据驱动全链路：筛选在 export 来源下照常（匹配 N 条）', async ({ page }) => {
+  await gotoLocal(page);
+  await load(page);
+  await page.getByTestId('tab_manage').click();
+  await page.getByTestId('page_manage').getByTestId('btn_open_local').click();
+  await expect(page.getByTestId('page_manage').getByTestId('lbl_source')).toHaveText(
+    '来源：导出目录',
+  );
+
+  // 回读复用全部前端链路（docs/06 Phase 1 行 3）：切筛选页做关键词筛选
+  await page.getByTestId('tab_filter').click();
+  const query = page.getByTestId('entry_query');
+  await query.fill('XYZ');
+  await query.press('Enter');
+  await expect(status(page)).toContainText('匹配 1 条');
+  await expect(filterPage(page).locator('.msg-row')).toHaveCount(1);
+  await expect(filterPage(page)).toContainText('群二消息 特殊关键词XYZ');
+  await expect(status(page)).toContainText('来源：导出目录');
+});
 
 test('A2 #26 管理页「在筛选中查找」→ 切页 + entry_chat 预填 + 结果只剩该会话', async ({ page }) => {
   await gotoAndInstall(page);

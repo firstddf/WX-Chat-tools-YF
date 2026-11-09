@@ -35,6 +35,7 @@ __all__ = [
     "media_json",
     "load_result",
     "export_result",
+    "bundle_result",
     "to_error",
 ]
 
@@ -132,6 +133,27 @@ def load_result(source: str, items: list[Any]) -> dict[str, Any]:
 def export_result(path: Path | str, count: int) -> dict[str, Any]:
     target = Path(path)
     return {"path": str(target), "count": int(count), "bytes": target.stat().st_size}
+
+
+def bundle_result(path: Path | str, report: Any) -> dict[str, Any]:
+    """本地数据包（export format=bundle）的 result（docs/02 §1.2 2026-11-09 增补）。
+
+    path=数据包根目录；count=导出报告 messages；bytes=目录总字节数（遍历求和，
+    只 stat 文件——数据包可达数 GB，但文件数在数千量级，耗时可忽略）。
+    """
+    root = Path(path)
+    total = 0
+    for p in root.rglob("*"):
+        try:
+            if p.is_file():
+                total += p.stat().st_size
+        except OSError:                      # 竞态删除/权限：不阻塞应答
+            continue
+    return {
+        "path": str(root),
+        "count": int(getattr(report, "messages", 0) or 0),
+        "bytes": total,
+    }
 
 
 def _exc_text(exc: BaseException, fallback: str) -> str:

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::error::AppError;
 use crate::sidecar::{
@@ -54,6 +54,7 @@ pub async fn load_data(
     account: Option<String>,
     out_dir: Option<String>,
     options: Option<Value>,
+    app: tauri::AppHandle,
     manager: State<'_, SidecarManager>,
 ) -> Result<Value, AppError> {
     let params = match kind.as_str() {
@@ -87,6 +88,10 @@ pub async fn load_data(
     if kind == "export" {
         if let Some(d) = out_dir.filter(|s| !s.is_empty()) {
             manager.add_export_root(&d);
+            // 数据包内图片缩略图可显示（docs/02 §2 load_data 2026-11-09 增补）
+            app.asset_protocol_scope()
+                .allow_directory(&d, true)
+                .map_err(|e| AppError::internal_detail("数据包 asset scope 放行失败", e.to_string()))?;
         }
     }
     manager.register_media_from(&result);
@@ -94,17 +99,21 @@ pub async fn load_data(
 }
 
 /// `export_messages` → sidecar `export`（作用于 sidecar 内存数据，D3）。
-/// `out_path` 由前端先经 `plugin:dialog|save` 取得（docs/03 §5.3）。
+/// `out_path` 由前端先经 `plugin:dialog|save` 取得（docs/03 §5.3）；
+/// `format:"bundle"`（本地数据包，docs/02 §1.2 2026-11-09）时 scope 省略（传 null）、
+/// `out_path` 为目录——成功后数据包根进 PathScope **与 asset 协议 scope**
+/// （包内图片缩略图可显示）。
 #[tauri::command]
 pub async fn export_messages(
     format: String,
     scope: Value,
     out_path: String,
+    app: tauri::AppHandle,
     manager: State<'_, SidecarManager>,
 ) -> Result<Value, AppError> {
-    if format != "json" && format != "csv" {
+    if format != "json" && format != "csv" && format != "bundle" {
         return Err(AppError::internal(format!(
-            "format 取值非法: {format:?}（应为 json|csv）"
+            "format 取值非法: {format:?}（应为 json|csv|bundle）"
         )));
     }
     if out_path.trim().is_empty() {
@@ -113,6 +122,7 @@ pub async fn export_messages(
     if !Path::new(&out_path).is_absolute() {
         return Err(AppError::internal("export 的 out_path 必须是绝对路径"));
     }
+    let is_bundle = format == "bundle";
     let out_parent = Path::new(&out_path)
         .parent()
         .map(|p| p.to_string_lossy().into_owned());
@@ -120,8 +130,14 @@ pub async fn export_messages(
     let params = json!({ "format": format, "scope": scope, "out_path": out_path });
     let result = manager.call("export", params, EXPORT_TIMEOUT).await?;
 
-    // 最近导出目录 → scope 白名单（docs/03 §5.2）
-    if let Some(parent) = out_parent {
+    if is_bundle {
+        // 数据包根（不是父目录）：PathScope 前缀 + asset 协议放行（docs/02 §2）
+        manager.add_export_root(&out_path);
+        app.asset_protocol_scope()
+            .allow_directory(&out_path, true)
+            .map_err(|e| AppError::internal_detail("数据包 asset scope 放行失败", e.to_string()))?;
+    } else if let Some(parent) = out_parent {
+        // 最近导出目录 → scope 白名单（docs/03 §5.2）
         manager.add_export_root(&parent);
     }
     Ok(result)

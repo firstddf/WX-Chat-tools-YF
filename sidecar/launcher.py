@@ -32,7 +32,7 @@ import mapping  # noqa: E402  sidecar 同目录
 from mapping import PROTOCOL_VERSION, SidecarError  # noqa: E402
 
 from wxchart import __version__ as APP_VERSION  # noqa: E402
-from wxchart import config, guidata, keys, model  # noqa: E402
+from wxchart import config, exporter, guidata, keys, model  # noqa: E402
 from wxchart.model import MediaAsset  # noqa: E402  直接引类：定位 helper 不受 model 打桩影响
 from wxchart.store import Store  # noqa: E402
 
@@ -74,6 +74,9 @@ class Sidecar:
         # 真实 MediaResolver（懒解码）：加载期只挂薄代理到 store，真实例留在这里，
         # 供 resolve_media / export 按需解码（store.close() 后仍可用——只依赖 work_dir 文件）
         self._media_resolver: Any | None = None
+        # 打包上下文（export format=bundle，docs/02 §1.2 2026-11-09）：store 来源加载成功后
+        # 持有 账号/KeySet/会话清单/工作目录——打包时重开解密库（缓存命中不解密，不需微信进程）
+        self._store_ctx: dict[str, Any] | None = None
 
     # ------------------------------------------------------------ 分发
 
@@ -127,6 +130,8 @@ class Sidecar:
         self._items, self._source = items, "export"
         # export 来源没有 raw 消息 → 本次不挂 resolver（resolve_media 原样返回，docs/02 §1.2）
         self._media_resolver = None
+        # 导出目录来源没有账号/KeySet → 不可再打包 bundle（docs/02 §1.2）
+        self._store_ctx = None
         return mapping.load_result("export", items)
 
     def _load_store(self, params: dict[str, Any]) -> dict[str, Any]:
@@ -177,12 +182,19 @@ class Sidecar:
         # 与 _items 一起提交：load 失败时不换 resolver（旧数据仍配旧 resolver）
         self._items, self._source = items, "store"
         self._media_resolver = resolver
+        # 打包上下文与数据一起提交（store 已在 finally 关闭；bundle 时重开）
+        self._store_ctx = {
+            "account": account, "keys": ks, "chats": chats, "work_dir": work_dir,
+        }
         return mapping.load_result("store", items)
 
     def _export(self, params: dict[str, Any]) -> dict[str, Any]:
         fmt = params.get("format")
+        if fmt == "bundle":
+            return self._export_bundle(params)
         if fmt not in ("json", "csv"):
-            raise SidecarError("INTERNAL", f"format 取值非法: {fmt!r}（应为 json|csv）")
+            raise SidecarError(
+                "INTERNAL", f"format 取值非法: {fmt!r}（应为 json|csv|bundle）")
         out_path = params.get("out_path")
         if not isinstance(out_path, str) or not out_path:
             raise SidecarError("INTERNAL", "export 缺少 out_path")
@@ -207,6 +219,83 @@ class Sidecar:
                 "EXPORT_FAILED", f"写文件失败: {out_path}", str(exc)
             ) from exc
         return mapping.export_result(path, len(subset))
+
+    def _export_bundle(self, params: dict[str, Any]) -> dict[str, Any]:
+        """本地数据包（docs/02 §1.2 format=bundle、docs/06 Phase 1）。
+
+        全量复用 Tk ``exporter.export()``：HTML 站点 + 附件副本 + ``.wxchart-state.json``
+        + 导出报告（三方格式一致，回读走既有 ``load_source kind=export``）。
+        重开解密库（KeySet 持有、缓存命中不解密）并挂**真实** MediaResolver——
+        与 Tk ``start_export`` 同款，附件在导出迭代中照常解码复制。
+        """
+        out_path = params.get("out_path")
+        if not isinstance(out_path, str) or not out_path:
+            raise SidecarError("INTERNAL", "export 缺少 out_path")
+        if params.get("scope") is not None:
+            raise SidecarError("INTERNAL", "format=bundle 不接受 scope（全量数据包）")
+        if self._items is None:
+            # D3：与 json/csv 同一未加载口径（docs/02 §1.2）
+            raise SidecarError("SOURCE_UNAVAILABLE", "尚未加载数据（先调 load_source）")
+        ctx = self._store_ctx
+        if ctx is None:
+            raise SidecarError(
+                "INTERNAL", "数据包导出仅支持扫描加载的数据（导出目录来源请重新扫描）")
+
+        def on_progress(message: str, pct: float) -> None:
+            # exporter 进度（0-100）→ 协议 progress 通知（docs/02 §1.2 export_bundle）
+            self._writer.emit({
+                "method": "progress",
+                "params": {
+                    "phase": "export_bundle",
+                    "done": int(round(pct)),
+                    "total": 100,
+                    "message": message,
+                },
+            })
+
+        root = Path(out_path)
+        store = Store(ctx["account"], ctx["work_dir"])
+        try:
+            try:
+                store.prepare(ctx["keys"])     # 解密缓存命中即跳过（文件级，不需要微信进程）
+                resolver = self._bundle_resolver(ctx)
+                if resolver is not None:
+                    # 同 Tk start_export（gui.py:463）：真实解析器，附件解码复制
+                    store.__dict__["_media_resolver"] = resolver
+                report = exporter.export(
+                    ctx["account"], store, ctx["chats"], out_dir=root,
+                    progress=on_progress,
+                )
+            except ValueError as exc:
+                # 输出目录被其它账号占用等：Tk 抛 ValueError，文案本身可展示
+                raise SidecarError("INTERNAL", str(exc)) from exc
+            except OSError as exc:
+                raise SidecarError(
+                    "EXPORT_FAILED", f"写文件失败: {out_path}", str(exc)
+                ) from exc
+        finally:
+            store.close()
+        return mapping.bundle_result(root, report)
+
+    def _bundle_resolver(self, ctx: dict[str, Any]) -> Any | None:
+        """数据包导出的附件解析器：优先复用加载期真实例（图片密钥已备）；
+        没有（resolve_media=false）则现场建一个——同 Tk start_export，附件解析与
+        懒解码开关无关。创建/密钥失败只影响附件，不阻断导出。"""
+        resolver = self._media_resolver
+        if resolver is not None:
+            return resolver
+        try:
+            from wxchart.media import MediaResolver
+
+            resolver = MediaResolver(ctx["account"], ctx["work_dir"], set(MEDIA_INCLUDE))
+        except Exception as exc:  # noqa: BLE001 - 附件解析失败只影响预览（同 Tk）
+            _log("warn", f"数据包附件解析初始化失败（导出将不含附件）: {exc}")
+            return None
+        try:
+            resolver.ensure_image_key(progress=lambda _message, _pct: None)
+        except Exception as exc:  # noqa: BLE001
+            _log("warn", f"图片密钥初始化失败（图片可能未解密）: {exc}")
+        return resolver
 
     def _subset(self, scope: dict[str, Any]) -> list[Any]:
         assert self._items is not None

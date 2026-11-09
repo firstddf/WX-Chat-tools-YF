@@ -607,10 +607,13 @@ def fake_resolver_cls(index=None, *, on_resolve=None, capture=None, events=None)
 
 
 def run_store_load(sc, msgs, *, options=None, work_dir=None, resolver_cls=None,
-                   events=None):
+                   events=None, stack=None):
     """mock 跑一次 load_source(kind=store)；FakeStore 复刻 model.iter_messages 的媒体钩子。
 
     返回 holder：``{"result", "store", "account", "resolver_at_iter"}``。
+    ``stack``：调用方传入 ExitStack 时补丁进调用方的栈、不由本函数关闭——
+    bundle 导出要在**同一补丁窗口**内重开 Store（docs/02 §1.2 format=bundle）；
+    缺省自建自关（原行为）。
     """
     class FakeChat:
         username = "48025936916@chatroom"
@@ -653,14 +656,16 @@ def run_store_load(sc, msgs, *, options=None, work_dir=None, resolver_cls=None,
                         last_active=12.0)
     holder["account"] = account
     env = {"WXCHART_SIDECAR_WORK_DIR": str(work_dir)} if work_dir else {}
-    with ExitStack() as stack:
-        cfg = stack.enter_context(mock.patch.object(launcher, "config"))
-        keys_mod = stack.enter_context(mock.patch.object(launcher, "keys"))
-        stack.enter_context(mock.patch.object(launcher, "Store", FakeStore))
-        model_mod = stack.enter_context(mock.patch.object(launcher, "model"))
-        stack.enter_context(mock.patch.dict(os.environ, env))
+    owned = stack is None
+    s = ExitStack() if owned else stack
+    try:
+        cfg = s.enter_context(mock.patch.object(launcher, "config"))
+        keys_mod = s.enter_context(mock.patch.object(launcher, "keys"))
+        s.enter_context(mock.patch.object(launcher, "Store", FakeStore))
+        model_mod = s.enter_context(mock.patch.object(launcher, "model"))
+        s.enter_context(mock.patch.dict(os.environ, env))
         if resolver_cls is not None:
-            stack.enter_context(mock.patch("wxchart.media.MediaResolver", resolver_cls))
+            s.enter_context(mock.patch("wxchart.media.MediaResolver", resolver_cls))
         cfg.discover_accounts.return_value = [account]
         cfg.resolve_self_username.return_value = "wxid_fake"
         keys_mod.extract_keys.return_value = object()
@@ -670,6 +675,9 @@ def run_store_load(sc, msgs, *, options=None, work_dir=None, resolver_cls=None,
         if options is not None:
             params["options"] = options
         holder["result"] = sc.handle("load_source", params)
+    finally:
+        if owned:
+            s.close()
     holder["resolver_at_iter"] = holder["store"].resolver_at_iter
     return holder
 
@@ -1079,6 +1087,117 @@ def test_export_backfills_undecoded_images() -> None:
         assert {"phase": "resolve_media", "done": total, "total": total,
                 "message": f"解码图片 {total}/{total}"} in params
         assert len(prog) == 2, f"51 条 → 恰好 2 条 progress，实得 {len(prog)}"
+
+
+# ---------------------------------------------------------------- 本地数据包 bundle（docs/02 §1.2 / docs/06 Phase 1）
+
+def _run_bundle(sc, msgs, out, *, work_dir, resolver_cls=None):
+    """同一补丁窗口内跑 load_source(kind=store) + export(format=bundle)。
+
+    返回 (load_result, bundle_result)；补丁在 bundle 应答后才撤
+    （bundle 要重开 Store——Store/config/keys/model 必须仍是替身）。
+    """
+    with ExitStack() as stack:
+        holder = run_store_load(sc, msgs, options={"resolve_media": True},
+                                work_dir=work_dir, resolver_cls=resolver_cls,
+                                stack=stack)
+        buf: io.StringIO = sc._writer.stream          # type: ignore[attr-defined]
+        buf.seek(0)
+        buf.truncate(0)                               # 只断言 bundle 期间的 progress
+        res = sc.handle("export", {"format": "bundle", "out_path": str(out)})
+    return holder, res
+
+
+def test_export_bundle_shape() -> None:
+    """bundle 产出形状：站点/state/报告齐 + result {path,count,bytes} + progress。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        msgs = [FakeRaw("text", text="你好", local_id=1),
+                FakeRaw("text", text="报价单已发", local_id=2)]
+        _, res = _run_bundle(sc, msgs, tmp_path / "pkg",
+                             work_dir=tmp_path / "work",
+                             resolver_cls=fake_resolver_cls())
+        assert res["path"] == str(tmp_path / "pkg")
+        assert res["count"] == 2, res
+        assert res["bytes"] > 0, "数据包总字节数应 > 0"
+        out = Path(res["path"])
+        # exporter 原样产出（docs/06：HTML 站点 + 附件 + state + 报告）
+        assert (out / "索引.html").is_file()
+        assert (out / ".wxchart-state.json").is_file()
+        assert (out / "导出报告.json").is_file()
+        assert (out / "测试群_48025936916@chatroom" / "索引.html").is_file()
+        assert (out / "测试群_48025936916@chatroom" / "消息.csv").is_file()
+
+        frames = [json.loads(ln) for ln in buf.getvalue().splitlines() if ln.strip()]
+        prog = [f["params"] for f in frames if f.get("method") == "progress"]
+        assert prog, "bundle 期间应发 progress"
+        assert all(p["phase"] == "export_bundle" and p["total"] == 100 for p in prog), prog
+        assert all("id" not in f for f in frames if f.get("method") == "progress")
+
+
+def test_export_bundle_state_reloadable() -> None:
+    """bundle 的 .wxchart-state.json 可被 load_source kind=export 回读（脱离微信）。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        msgs = [FakeRaw("text", text="本地数据回读", local_id=5)]
+        _run_bundle(sc, msgs, tmp_path / "pkg",
+                    work_dir=tmp_path / "work", resolver_cls=fake_resolver_cls())
+
+        res = sc.handle("load_source", {"kind": "export",
+                                        "out_dir": str(tmp_path / "pkg")})
+        assert res["source"] == "export"
+        assert len(res["messages"]) == 1
+        assert res["messages"][0]["text"] == "本地数据回读"
+
+        # 回读来源没有账号/KeySet：再打包 → INTERNAL（docs/02 §1.2 仅 store 来源）
+        try:
+            sc.handle("export", {"format": "bundle",
+                                 "out_path": str(tmp_path / "pkg2")})
+            raise AssertionError("导出目录来源打包应抛 INTERNAL")
+        except mapping.SidecarError as exc:
+            assert exc.code == "INTERNAL" and "扫描" in exc.message
+
+
+def test_export_bundle_missing_media_tolerated() -> None:
+    """附件缺失只记入导出报告（media-missing）不中断导出（docs/02 §1.2 容错口径）。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        missing = tmp_path / "no-such" / "运单.xlsx"
+
+        def on_resolve(msg):
+            if msg.type != "file":
+                return []
+            return [FakeAsset("file", str(missing), "运单.xlsx", 10)]
+
+        msgs = [FakeRaw("file", file_name="运单.xlsx", local_id=1),
+                FakeRaw("text", text="正常消息", local_id=2)]
+        _, res = _run_bundle(sc, msgs, tmp_path / "pkg",
+                             work_dir=tmp_path / "work",
+                             resolver_cls=fake_resolver_cls(on_resolve=on_resolve))
+        assert res["count"] == 2, "附件缺失不中断导出"
+        report = json.loads(
+            (Path(res["path"]) / "导出报告.json").read_text(encoding="utf-8"))
+        assert any(e.get("code") == "media-missing" for e in report["errors"]), \
+            report["errors"]
+
+
+def test_export_bundle_before_load_source_unavailable() -> None:
+    """未加载就打包 → SOURCE_UNAVAILABLE（与 json/csv 同一口径，docs/02 §1.2）。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            sc.handle("export", {"format": "bundle",
+                                 "out_path": str(Path(tmp) / "pkg")})
+            raise AssertionError("未加载打包应抛 SOURCE_UNAVAILABLE")
+        except mapping.SidecarError as exc:
+            assert exc.code == "SOURCE_UNAVAILABLE"
 
 
 # ---------------------------------------------------------------- 直跑入口
