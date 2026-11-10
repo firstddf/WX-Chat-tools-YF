@@ -8,7 +8,8 @@
 // WebView2 遇到 API 参数即忽略该环境变量，2026-11-07 三种注入方式 A/B 实测）；
 // 要开 CDP 只能走 config：`pnpm tauri build -c <overlay.json>`（app.windows[0]
 // .additionalBrowserArgs = wry 默认串 + --remote-debugging-port=9223）。
-// 用法：node scripts/install-smoke.mjs [--port 9223] [--timeout 300000]
+// 用法：node scripts/install-smoke.mjs [--port 9223] [--timeout 300000] [--accounts 4]
+// --accounts：账号数断言（默认 4 = 源机口径；本机数据根账号数不同则传参，2026-11-10 #6）
 // 注意：只断开、不 close（browser.close() 会连带杀掉真实壳的 WebView2）。
 import { chromium } from '@playwright/test';
 
@@ -18,6 +19,7 @@ const arg = (name, def) => {
 };
 const port = Number(arg('--port', 9223));
 const loadTimeout = Number(arg('--timeout', 300000));
+const expectAccounts = Number(arg('--accounts', 4));
 
 const results = [];
 const step = (name, ok, detail = '') => {
@@ -51,9 +53,9 @@ if (info) {
 // 2) 账号栏（<option> 在 select 内不可见，必须等 attached 而不是 visible）
 await page.waitForSelector('[data-testid="cmb_account"] option', { state: 'attached', timeout: 30000 });
 const opts = await page.$$eval('[data-testid="cmb_account"] option', (els) => els.map((e) => e.value));
-step('账号栏 4 账号', opts.length === 4, opts.join(', '));
+step(`账号栏 ${expectAccounts} 账号`, opts.length === expectAccounts, opts.join(', '));
 const accStatus = ((await page.textContent('[data-testid="account_status"]').catch(() => '')) || '').trim();
-step('账号栏状态文案（发现 N 个账号）', /发现\s*4\s*个账号/.test(accStatus), accStatus.slice(0, 80));
+step(`账号栏状态文案（发现 ${expectAccounts} 个账号）`, new RegExp(`发现\\s*${expectAccounts}\\s*个账号`).test(accStatus), accStatus.slice(0, 80));
 
 // 3) 加载 → 状态行
 const t0 = Date.now();
