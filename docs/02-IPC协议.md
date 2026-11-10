@@ -77,6 +77,30 @@
 {"format":"bundle", "out_path":"D:\\本地数据\\wxid_xxx"}   // 目录；不带 scope（scope 传 null → INTERNAL）
 ```
 
+**2026-11-10 增补（#14 导出设置页，设计冻结、2026-11-11 实现——实现前调用方勿用）**：bundle 增加
+可选 `options`（**整体可省 = Phase 1 全量行为，向后兼容**）：
+
+```jsonc
+{"format":"bundle", "out_path":"D:\\本地数据\\wxid_xxx",
+ "options":{
+   "chats":["21803970213@chatroom", …],   // 会话子集（chat.username 列表）；缺省=全部；显式 [] → INTERNAL（未选择会话）；未知 id → INTERNAL（指明 id）
+   "start_ts":0, "end_ts":0,              // 时间范围（unix 秒闭区间，0=不限）→ exporter.start_ts/end_ts；start_ts>end_ts（均非0）→ INTERNAL
+   "include":["text","image","file","video","voice"], // 正文类型子集 → exporter.include；缺省=五类；归一化恒含 "text"（同 Tk）；未知类型 → INTERNAL
+   "artifacts":{"html":true,"csv":true,"media_index":true,"date_index":true}, // 生成物开关 → exporter 同名参数；给了对象则逐键覆盖、缺键=true；未知键 → INTERNAL
+   "incremental":false                    // 增量 → exporter.incremental（export_state：同一 out_path 且同一账号才生效，跳过无新消息会话、附件不重复复制）
+ }}
+```
+
+- **白名单口径**：`options` 未知键 / 非预期类型 → `INTERNAL`（message 指明字段，同 `set_settings` 防静默丢失）；
+- **跨账号混写**：`incremental` 且 `out_path` 已有别的账号 state → exporter 抛 ValueError →
+  `INTERNAL`（message 中文原样：「输出目录已被账号 … 使用」）；
+- `incremental:true` 但目录无 state → 按全量执行（exporter 语义 `incremental and state`）；
+- **result 扩展**（v1 内兼容增键）：`{path, count, bytes, mode, new_messages}`——
+  `mode:"full"|"incremental"`、`new_messages`=报告新增条数（前端完成提示「增量导出完成：新增 N 条」，
+  同 Tk gui.py）；json/csv result 不变；
+- 复用不变：互斥锁 `EXPORTING_BUSY`、仅 store 来源、progress `phase:"export_bundle"`、
+  附件缺失容错、`load_source {kind:"export"}` 回读（**选择性子集包同样可回读**）。
+
 - 产出 = `exporter.export()` 原样（HTML 站点 + 附件副本 + `.wxchart-state.json` +
   `导出报告.json`，三方格式一致）→ `load_source {kind:"export", out_dir}` 可回读；
 - **仅扫描（store）来源可打包**：sidecar 持有账号/KeySet/会话清单，打包时重开解密库
@@ -152,7 +176,7 @@ media[{kind,name,path}], day_page`。
 | `scan_accounts` | `{root?}`（shell 注入 `settings.data_root`，前端不直接传；#13） | 见 §1.2 `{accounts, root, tried}` | 转发通道③；`root` 空串=未设置（走自动发现） |
 | `load_data` | `{kind, account?, outDir?, options?}`（键 camelCase，见上注） | `{source, chats, messages, stats, exported_at?}` | **全量**返回（≈11k 条 / 数 MB）；期间 emit `data://progress`；`kind=export` 成功后 `out_dir` 注册进 PathScope **与 asset 协议 scope**（数据包内图片可显示）；`kind=store` 时壳同样注入 `settings.data_root`（#13，与 `scan_accounts` 同口径）；`exported_at` 仅 export 来源（见 §1.2/§1.3，2026-11-10） |
 | `resolve_media` | `{indexes:number[]}` | `{items:[{index, media:[Media,…]}]}` | 转发通道③ `resolve_media`（图片懒解码，超时 60s）；**新解码出的 `path` 同步加入 `open_path` 路径 scope 白名单**（否则点击打开报 `PATH_NOT_ALLOWED`） |
-| `export_messages` | `{format, scope?, outPath}`（键 camelCase，见上注） | `{path, count, bytes}` | `outPath` 由前端先经 `plugin:dialog\|save` 取得；`format:"bundle"` 时 scope 省略（传 null）、`outPath` 为**目录**（`plugin:dialog\|open` directory 模式）；bundle 成功后该目录注册进 PathScope **与 asset 协议 scope** |
+| `export_messages` | `{format, scope?, outPath, options?}`（键 camelCase，见上注；`options` 仅 bundle，2026-11-10 #14 增补、2026-11-11 实现） | `{path, count, bytes, mode?, newMessages?}` | `outPath` 由前端先经 `plugin:dialog\|save` 取得；`format:"bundle"` 时 scope 省略（传 null）、`outPath` 为**目录**（`plugin:dialog\|open` directory 模式）；bundle 成功后该目录注册进 PathScope **与 asset 协议 scope** |
 | `open_path` | `{path}` | `{ok}` | opener 插件；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED` |
 | `reveal_path` | `{path}` | `{ok}` | 在资源管理器中定位 |
 | `doctor` | `{}`（shell 注入 `settings.data_root` → 通道③ `root`，前端不直接传；#13 同口径） | 见 §1.2 | 转发通道③ `doctor`；**超时 30s**（解密全库比 10s 默认长，docs/07 #3） |
