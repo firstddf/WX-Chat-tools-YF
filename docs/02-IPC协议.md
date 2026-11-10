@@ -53,7 +53,7 @@
 |---|---|---|---|
 | `ping` | `{}` | `{protocol_version:1, app_version:"0.1.0-dev", python:"3.10.11"}` | 健康检查，启动即调；`app_version` = 数据层 `wxchart.__version__`，`python` = `platform.python_version()` 完整版本号 |
 | `scan_accounts` | `{}` 或 `{root}`（**显式数据目录**，shell 由 settings.data_root 注入；2026-11-09 #13） | `{accounts:[{wxid, nickname, active, root}], root, tried}` | `config.discover_accounts`；`active` 为 unix 秒，`nickname` M-A1 暂回显 wxid（M-A4 doctor 接 contact 显示名）。**发现顺序**：`WXCHART_XWECHAT_ROOT` env（**操作者覆盖，最高优先**——测试/真机脚本靠它隔离数据）→ 显式 `root`（用户设置 `settings.data_root`，只试它，不回落）→ `%APPDATA%\Tencent\xwechat_files` → `%USERPROFILE%\Documents\WeChat Files` → 数据层默认路径，**首个命中即停**；`root`=命中的目录（空结果时 `""`）、`tried`=已尝试位置（空结果时前端展示可操作引导，A2 #30 不白屏口径） |
-| `load_source` | `{kind:"store", account, root?, options?:{resolve_media?:bool}}` 或 `{kind:"export", out_dir}` | `{source, chats, messages, stats}`（形状见 §1.3） | `guidata.load_from_store` / `load_from_export_dir`；`root`=显式数据目录（壳注入 settings.data_root，#13——**与 `scan_accounts` 同一发现口径**，否则扫到加载 NO_ACCOUNT）；`resolve_media=true` 时挂 MediaResolver：**文件/视频/语音照常解析，图片只定位不解码**（`media[].decoded=false`、`path=""`，name 为 `.dat` 文件名或 `md5.dat`；缓存已有解码产物的直接回填 `decoded=true`）——懒解码，解码由 `resolve_media` 方法按需完成（2026-11-07：加载期全量解码大账号 4700+ 图 ≈6.9min 顶穿 300s 超时） |
+| `load_source` | `{kind:"store", account, root?, options?:{resolve_media?:bool}}` 或 `{kind:"export", out_dir}` | `{source, chats, messages, stats, exported_at?}`（形状见 §1.3） | `guidata.load_from_store` / `load_from_export_dir`；`root`=显式数据目录（壳注入 settings.data_root，#13——**与 `scan_accounts` 同一发现口径**，否则扫到加载 NO_ACCOUNT）；export 来源附 `exported_at`（读包内 `导出报告.json.finished_at` → 回退 `.wxchart-state.json.last_export`，均缺失则省略键；2026-11-10 Phase 2 信息卡）；`resolve_media=true` 时挂 MediaResolver：**文件/视频/语音照常解析，图片只定位不解码**（`media[].decoded=false`、`path=""`，name 为 `.dat` 文件名或 `md5.dat`；缓存已有解码产物的直接回填 `decoded=true`）——懒解码，解码由 `resolve_media` 方法按需完成（2026-11-07：加载期全量解码大账号 4700+ 图 ≈6.9min 顶穿 300s 超时） |
 | `resolve_media` | `{indexes:[int,…]}`（`load_source` 结果 `messages` 的下标，与 sidecar 内存 `self._items` 同序） | `{items:[{index, media:[Media,…]}]}` | **按需解码图片（懒解码）**：对每条下标对应的 `raw` 消息重跑 `MediaResolver.resolve`，`media` 形状同 §1.3；与 `load_source`/`export` 共用互斥锁（冲突 `EXPORTING_BUSY`）；未加载 → `SOURCE_UNAVAILABLE`；已加载但本次未挂 resolver（`resolve_media=false` 或 export 来源）→ **原样返回**（前端据此停止重试）；下标非法/越界 → `INTERNAL` |
 | `export` | `{format:"json"\|"csv", scope, out_path}` 或 `{format:"bundle", out_path}`（bundle 见下） | `{path, count, bytes}` | json/csv：`guidata.to_records/write_json/write_csv`，**作用于已加载的内存数据**（D3），未先 `load_source` → `SOURCE_UNAVAILABLE`；bundle：**本地数据包**（见下），同一互斥锁与未加载口径 |
 | `doctor` | `{}` 或 `{root}`（**显式数据目录**，shell 由 settings.data_root 注入，与 `scan_accounts` 同口径；2026-11-09 #3） | `{version, account:{wxid,root}, key_sources:{mode,pid,hit,total,missing}, dbs:[{name,ok}], messages?}` | **数据层自检**（复用 `cli.cmd_doctor` 数据部分，不 import argparse 命令行壳）：发现账号 → 提取密钥 → 逐库解密 → 消息总数；与 load/export **互斥**（`EXPORTING_BUSY`）；无账号 → `NO_ACCOUNT`、密钥取不到 → `KEY_NOT_FOUND`（微信未运行）；**部分库解密失败不报错**——`dbs[].ok=false` 逐库呈现；`messages` 仅在库可读时给出（缺省时前端显示 `—`）；**不含任何密钥值**（docs/03 §5） |
@@ -107,7 +107,10 @@
     "is_group":true, "count":132, "last_ts":1793676480}],
  "messages": [ /* Message 全量，按 (ts, local_id) 正序 */ ],
  "stats": {"messages":11796, "chats":42, "media":130,
-           "first_ts":1793000000, "last_ts":1793676480}}
+           "first_ts":1793000000, "last_ts":1793676480},
+ "exported_at": "2026-11-09 21:30:00"}  // 仅 export 来源且包内有导出报告/state 时给出
+                                          // （导出完成时间，管理页信息卡用；缺省省略该键。
+                                          //  2026-11-10 Phase 2 增补，v1 内兼容不递增）
 ```
 
 **Message**（应用内全量记录，比导出 JSON 多服务端定位字段）：
@@ -147,7 +150,7 @@ media[{kind,name,path}], day_page`。
 |---|---|---|---|
 | `app_info` | `{}` | `{name, version, protocol_version, sidecar:{state, protocol_version?}}` | 启动握手；壳校验 sidecar 协议主版本一致，不一致置 `state:"mismatch"` |
 | `scan_accounts` | `{root?}`（shell 注入 `settings.data_root`，前端不直接传；#13） | 见 §1.2 `{accounts, root, tried}` | 转发通道③；`root` 空串=未设置（走自动发现） |
-| `load_data` | `{kind, account?, outDir?, options?}`（键 camelCase，见上注） | `{source, chats, messages, stats}` | **全量**返回（≈11k 条 / 数 MB）；期间 emit `data://progress`；`kind=export` 成功后 `out_dir` 注册进 PathScope **与 asset 协议 scope**（数据包内图片可显示）；`kind=store` 时壳同样注入 `settings.data_root`（#13，与 `scan_accounts` 同口径） |
+| `load_data` | `{kind, account?, outDir?, options?}`（键 camelCase，见上注） | `{source, chats, messages, stats, exported_at?}` | **全量**返回（≈11k 条 / 数 MB）；期间 emit `data://progress`；`kind=export` 成功后 `out_dir` 注册进 PathScope **与 asset 协议 scope**（数据包内图片可显示）；`kind=store` 时壳同样注入 `settings.data_root`（#13，与 `scan_accounts` 同口径）；`exported_at` 仅 export 来源（见 §1.2/§1.3，2026-11-10） |
 | `resolve_media` | `{indexes:number[]}` | `{items:[{index, media:[Media,…]}]}` | 转发通道③ `resolve_media`（图片懒解码，超时 60s）；**新解码出的 `path` 同步加入 `open_path` 路径 scope 白名单**（否则点击打开报 `PATH_NOT_ALLOWED`） |
 | `export_messages` | `{format, scope?, outPath}`（键 camelCase，见上注） | `{path, count, bytes}` | `outPath` 由前端先经 `plugin:dialog\|save` 取得；`format:"bundle"` 时 scope 省略（传 null）、`outPath` 为**目录**（`plugin:dialog\|open` directory 模式）；bundle 成功后该目录注册进 PathScope **与 asset 协议 scope** |
 | `open_path` | `{path}` | `{ok}` | opener 插件；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED` |

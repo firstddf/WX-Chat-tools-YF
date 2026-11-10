@@ -15,6 +15,7 @@ void store.init();
 
 const tab = ref<'filter' | 'manage'>('filter');
 const filterPanelRef = ref<InstanceType<typeof FilterPanel> | null>(null);
+const chatListRef = ref<InstanceType<typeof ChatList> | null>(null);
 
 const banner = computed(() => {
   const state = store.data.sidecar.state;
@@ -26,6 +27,12 @@ const banner = computed(() => {
 function onToFilter(chatId: string): void {
   tab.value = 'filter';
   filterPanelRef.value?.focusChat(chatId);
+}
+
+/** 状态行「打开本地数据」出口（docs/07 Phase 2 #7）：跳管理页并触发选目录 */
+function onOpenLocal(): void {
+  tab.value = 'manage';
+  void chatListRef.value?.openLocal();
 }
 </script>
 
@@ -56,7 +63,7 @@ function onToFilter(chatId: string): void {
     <div v-if="banner" class="banner" data-testid="sidecar_banner">{{ banner }}</div>
 
     <div v-show="tab === 'filter'" class="tabpage" data-testid="page_filter">
-      <FilterPanel ref="filterPanelRef" />
+      <FilterPanel ref="filterPanelRef" @open-local="onOpenLocal" />
       <MessageList
         :items="store.matched.value"
         :messages="store.data.messages"
@@ -66,7 +73,7 @@ function onToFilter(chatId: string): void {
     </div>
 
     <div v-show="tab === 'manage'" class="tabpage" data-testid="page_manage">
-      <ChatList @to-filter="onToFilter" />
+      <ChatList ref="chatListRef" @to-filter="onToFilter" />
     </div>
   </div>
 </template>

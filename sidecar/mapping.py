@@ -112,12 +112,16 @@ def message_json(item: Any) -> dict[str, Any]:
     }
 
 
-def load_result(source: str, items: list[Any]) -> dict[str, Any]:
-    """load_source 的 result（docs/02 §1.3「load_source 的 result」）。"""
+def load_result(source: str, items: list[Any], exported_at: str = "") -> dict[str, Any]:
+    """load_source 的 result（docs/02 §1.3「load_source 的 result」）。
+
+    ``exported_at``：仅 export 来源给出（导出完成时间，管理页信息卡用，2026-11-10
+    Phase 2 增补）——空串省略该键（store 来源 / 包内无报告）。
+    """
     chats = guidata.chat_options(items)
     timestamps = [int(m.ts or 0) for m in items]
     nonzero = [t for t in timestamps if t]
-    return {
+    out: dict[str, Any] = {
         "source": source,
         "chats": chats,
         "messages": [message_json(m) for m in items],
@@ -129,6 +133,9 @@ def load_result(source: str, items: list[Any]) -> dict[str, Any]:
             "last_ts": max(nonzero) if nonzero else 0,
         },
     }
+    if source == "export" and exported_at:
+        out["exported_at"] = exported_at
+    return out
 
 
 def export_result(path: Path | str, count: int) -> dict[str, Any]:

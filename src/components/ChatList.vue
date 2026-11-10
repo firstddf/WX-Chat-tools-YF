@@ -47,6 +47,23 @@ const sourceLabel = computed(() =>
   data.source ? `来源：${data.source === 'store' ? '扫描' : '导出目录'}` : '',
 );
 
+/** 数据源信息卡（docs/06 Phase 2 #8）：来源/条数/导出时间/附件数（stats + exported_at 现成） */
+const sourceCard = computed(() => {
+  if (!data.loaded) return null;
+  const rows: Array<{ testid: string; text: string }> = [
+    { testid: 'card_source', text: sourceLabel.value || '来源：—' },
+    { testid: 'card_count', text: `条数 ${data.stats?.messages ?? data.messages.length}` },
+    { testid: 'card_media', text: `附件 ${data.stats?.media ?? 0}` },
+  ];
+  if (data.exportedAt) {
+    rows.push({ testid: 'card_exported_at', text: `导出于 ${data.exportedAt}` });
+  }
+  return rows;
+});
+
+/** 最近本地数据目录（docs/07 #6）：一键回到上次的数据包 */
+const lastDir = computed(() => data.settings.last_export_dir);
+
 /** bundle 导出中的进度行（复用 data://progress，docs/07 P0 步骤 4） */
 const exportProgress = computed(() =>
   exporting.value && data.progress ? `导出中… ${data.progress.message}` : '',
@@ -60,7 +77,7 @@ function asError(e: unknown): ProtocolError {
 /** 导出本地数据包（format=bundle，全量；docs/02 §1.2 / docs/06 Phase 1） */
 async function exportBundle(): Promise<void> {
   if (exporting.value) return;
-  const dir = await pickDir();
+  const dir = await pickDir(lastDir.value || undefined); // 定位到上次的目录（#6 记忆）
   if (!dir) return;
   exporting.value = true;
   notice.value = '';
@@ -68,6 +85,7 @@ async function exportBundle(): Promise<void> {
     const r = await store.exportMessages({ format: 'bundle', out_path: dir });
     bundlePath.value = r.path;
     notice.value = `已导出数据包 ${r.count} 条 → ${r.path}`;
+    void store.rememberExportDir(r.path); // 数据包根 → 最近目录（#6）
   } catch (e) {
     notice.value = `⚠ ${asError(e).message}`;
   } finally {
@@ -77,11 +95,20 @@ async function exportBundle(): Promise<void> {
 
 /** 打开本地数据：选目录 → load {kind:"export"}，复用全部浏览/筛选链路 */
 async function openLocal(): Promise<void> {
-  const dir = await pickDir();
+  const dir = await pickDir(lastDir.value || undefined); // 定位到上次的目录（#6 记忆）
   if (!dir) return;
   notice.value = '';
   await store.load({ kind: 'export', out_dir: dir });
   // 成败由 store 写入的 data.error / summary / sourceLabel 展示（不另设错误条）
+  // 记忆由 store.load 成功路径统一写（rememberExportDir，#6）
+}
+
+/** 一键回到上次的本地数据包（docs/07 #6）：不弹选择框，直接回读记忆目录 */
+async function openRecent(): Promise<void> {
+  const dir = lastDir.value;
+  if (!dir) return;
+  notice.value = '';
+  await store.load({ kind: 'export', out_dir: dir });
 }
 
 /** 数据包导出完成后的「打开导出目录」（复用 reveal_path，scope 已由壳放行） */
@@ -140,6 +167,9 @@ async function copyId(): Promise<void> {
 function toFilter(): void {
   if (selectedId.value) emit('to-filter', selectedId.value);
 }
+
+// App 经 ref 触发：状态行「打开本地数据」出口（docs/07 Phase 2 #7）
+defineExpose({ openLocal });
 </script>
 
 <template>
@@ -195,6 +225,15 @@ function toFilter(): void {
           {{ doctorRunning ? '自检中…' : '自检' }}
         </button>
         <button
+          v-if="lastDir"
+          type="button"
+          class="f-btn"
+          data-testid="btn_open_recent"
+          @click="openRecent"
+        >
+          打开最近数据
+        </button>
+        <button
           v-if="bundlePath"
           type="button"
           class="f-btn"
@@ -233,6 +272,16 @@ function toFilter(): void {
     </div>
 
     <div class="f-count" data-testid="lbl_summary">{{ summary }}</div>
+
+    <!-- 数据源信息卡（docs/06 Phase 2 #8）：来源/条数/附件/导出时间（export 来源才有导出时间） -->
+    <div class="f-row source-card" v-if="sourceCard" data-testid="source_card">
+      <span
+        v-for="row in sourceCard"
+        :key="row.testid"
+        class="f-count"
+        :data-testid="row.testid"
+      >{{ row.text }}</span>
+    </div>
 
     <div class="manage-body">
       <div class="chat-tree" data-testid="chat_tree">

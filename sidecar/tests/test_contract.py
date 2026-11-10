@@ -370,6 +370,40 @@ def test_export_before_load_is_source_unavailable() -> None:
         p.stop()
 
 
+def test_load_source_export_exported_at() -> None:
+    """exported_at（docs/02 §1.3 2026-11-10 Phase 2 信息卡）：
+    无报告 → 省略键；有 导出报告.json → finished_at；回退 .wxchart-state.json last_export。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        out = make_export_dir(Path(tmp))
+        p = Proc()
+        try:
+            # 1) 夹具只有 day_entries（无报告/state 时间）→ 省略键
+            res = p.ask({"id": 1, "method": "load_source",
+                         "params": {"kind": "export", "out_dir": str(out)}})
+            assert "exported_at" not in res["result"], "缺失时省略键（不回空串）"
+
+            # 2) 写导出报告 → finished_at 原样回传
+            (out / "导出报告.json").write_text(
+                json.dumps({"finished_at": "2026-11-09 21:30:00", "messages": 3},
+                           ensure_ascii=False),
+                encoding="utf-8")
+            res2 = p.ask({"id": 2, "method": "load_source",
+                          "params": {"kind": "export", "out_dir": str(out)}})
+            assert res2["result"]["exported_at"] == "2026-11-09 21:30:00"
+
+            # 3) 报告损坏 → 回退 state 的 last_export
+            (out / "导出报告.json").write_text("{broken", encoding="utf-8")
+            state = json.loads((out / ".wxchart-state.json").read_text(encoding="utf-8"))
+            state["last_export"] = "2026-11-08 10:00:00"
+            (out / ".wxchart-state.json").write_text(
+                json.dumps(state, ensure_ascii=False), encoding="utf-8")
+            res3 = p.ask({"id": 3, "method": "load_source",
+                          "params": {"kind": "export", "out_dir": str(out)}})
+            assert res3["result"]["exported_at"] == "2026-11-08 10:00:00"
+        finally:
+            p.stop()
+
+
 # ---------------------------------------------------------------- 生命周期
 
 def test_stop_and_eof_exit() -> None:

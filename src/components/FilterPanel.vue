@@ -11,6 +11,7 @@ import DatePicker from './DatePicker.vue';
 
 const store = inject(STORE_KEY)!;
 const { data, filter, matched, selection } = store;
+const emit = defineEmits<{ 'open-local': [] }>();
 
 const queryDraft = ref('');
 const chatDraft = ref('');
@@ -155,6 +156,12 @@ const statusWarn = computed(
   () => Boolean(data.error) || Boolean(notice.value?.warn),
 );
 
+/** 微信数据不可用（KEY_NOT_FOUND/NO_ACCOUNT）→ 状态行给「打开本地数据」出口
+ *  （docs/07 Phase 2 #7：跳管理页触发选目录） */
+const showOpenLocal = computed(
+  () => data.error !== null && (data.error.code === 'KEY_NOT_FOUND' || data.error.code === 'NO_ACCOUNT'),
+);
+
 defineExpose({ focusChat });
 </script>
 
@@ -281,6 +288,15 @@ defineExpose({ focusChat });
 
     <div class="statusbar" :class="{ warn: statusWarn }" data-testid="lbl_status">
       {{ statusLine }}
+      <button
+        v-if="showOpenLocal"
+        type="button"
+        class="f-btn"
+        data-testid="btn_open_local_error"
+        @click="emit('open-local')"
+      >
+        打开本地数据
+      </button>
     </div>
   </div>
 </template>

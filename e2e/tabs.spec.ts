@@ -511,6 +511,55 @@ test('自检 #3 管理页点自检 → 结果面板（每库 ✅/❌ + 消息数
   await expect(page.getByTestId('page_manage')).toBeVisible(); // 不白屏
 });
 
+// ---------------------------------------------------------------- 本地数据 Phase 2（docs/07 #2）
+
+test('本地数据 Phase 2 #7 KEY_NOT_FOUND → 状态行「打开本地数据」→ 跳管理页回读 + 信息卡 + 记忆', async ({
+  page,
+}) => {
+  await page.goto('/');
+  // 注入 KEY_NOT_FOUND：store 加载失败 → 状态行出出口按钮
+  await installLoadError(page, 'KEY_NOT_FOUND');
+  await load(page, '微信刚启动还没解锁');
+  const openBtn = page.getByTestId('btn_open_local_error');
+  await expect(openBtn).toBeVisible();
+
+  // 清除注入（本地数据这条路是通的）→ 点出口 → 跳管理页 + 自动选目录回读
+  await page.evaluate(async () => {
+    const entries = performance.getEntriesByType('resource').map((e) => e.name);
+    const url = entries.find((n) => /\/src\/ipc\/mock\.ts/.test(n)) ?? '/src/ipc/mock.ts';
+    const mod = await import(url);
+    mod.MockIpc.prototype.loadData = async (params: { kind: string }) => ({
+      source: params.kind === 'store' ? 'store' : 'export',
+      chats: [],
+      messages: [],
+      stats: { messages: 0, chats: 0, media: 0, first_ts: 0, last_ts: 0 },
+      ...(params.kind === 'export' ? { exported_at: '2026-11-09 21:30:00' } : {}),
+    });
+  });
+  await openBtn.click();
+
+  await expect(page.getByTestId('tab_manage')).toHaveClass(/active/);
+  const manage = page.getByTestId('page_manage');
+  await expect(manage.getByTestId('lbl_source')).toHaveText('来源：导出目录');
+  // 出口按钮随错误清除而消失（load 成功路径 data.error=null）
+  await expect(openBtn).toHaveCount(0);
+
+  // #8 信息卡：来源/条数/附件/导出时间
+  await expect(manage.getByTestId('source_card')).toBeVisible();
+  await expect(manage.getByTestId('card_source')).toHaveText('来源：导出目录');
+  await expect(manage.getByTestId('card_count')).toHaveText('条数 0');
+  await expect(manage.getByTestId('card_exported_at')).toHaveText('导出于 2026-11-09 21:30:00');
+
+  // #6 记忆：last_export_dir 落 localStorage → 重开页面「打开最近数据」按钮出现
+  const saved = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('wxchart.mock.settings') ?? '{}'),
+  );
+  expect(saved.last_export_dir).toBe('C:/mock/local-data');
+  await page.reload();
+  await page.getByTestId('tab_manage').click();
+  await expect(page.getByTestId('btn_open_recent')).toBeVisible();
+});
+
 // ---------------------------------------------------------------- A2 #26
 
 test('A2 #26 管理页「在筛选中查找」→ 切页 + entry_chat 预填 + 结果只剩该会话', async ({ page }) => {

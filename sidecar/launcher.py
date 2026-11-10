@@ -143,7 +143,7 @@ class Sidecar:
         self._media_resolver = None
         # 导出目录来源没有账号/KeySet → 不可再打包 bundle（docs/02 §1.2）
         self._store_ctx = None
-        return mapping.load_result("export", items)
+        return mapping.load_result("export", items, exported_at=_read_exported_at(out_dir))
 
     def _load_store(self, params: dict[str, Any]) -> dict[str, Any]:
         # 与 scan_accounts 同一发现口径（docs/02 §1.2 root 注入，#13）——否则
@@ -604,6 +604,24 @@ def _pick_account(accounts: list[Any], prefer: Any) -> Any:
                 return a
         raise SidecarError("ACCOUNT_NOT_FOUND", f"账号不存在: {prefer}")
     return accounts[0]
+
+
+def _read_exported_at(out_dir: str) -> str:
+    """导出完成时间（docs/02 §1.3 `exported_at`，Phase 2 信息卡）。
+
+    读 ``<out_dir>/导出报告.json`` 的 ``finished_at`` → 回退 ``.wxchart-state.json``
+    的 ``last_export``（exporter 两处同源写入）→ 均缺失/损坏回空串（省略键）。
+    """
+    root = Path(out_dir)
+    for name, key in (("导出报告.json", "finished_at"), (".wxchart-state.json", "last_export")):
+        try:
+            data = json.loads((root / name).read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
+        val = data.get(key) if isinstance(data, dict) else None
+        if isinstance(val, str) and val:
+            return val
+    return ""
 
 
 def _error_frame(rid: Any, code: str, message: str, detail: str = "") -> dict[str, Any]:

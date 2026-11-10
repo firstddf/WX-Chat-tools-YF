@@ -40,6 +40,8 @@ export interface DataState {
   accountsRoot: string;
   /** 最近一次扫描尝试过的位置（#13；空结果时状态行给可操作引导） */
   accountsTried: string[];
+  /** export 来源的导出完成时间（docs/02 §1.3 exported_at，信息卡用；非 export 来源为空串） */
+  exportedAt: string;
 }
 
 // ---------------------------------------------------------------- 选择（Tk MessageView 语义）
@@ -139,6 +141,8 @@ export interface AppStore {
   exportMessages(params: ExportParams): Promise<ExportResult>;
   /** 设置微信数据目录并重扫（#13；空串=恢复自动发现） */
   setDataRoot(root: string): Promise<void>;
+  /** 记忆最近打开/导出的本地数据目录（docs/07 #2 最近目录；best-effort，失败静默） */
+  rememberExportDir(dir: string): Promise<void>;
   setFilter(patch: Partial<FilterSpec>): void;
   resetFilter(): void;
   /**
@@ -185,6 +189,7 @@ export function createStore(ipc: Ipc): AppStore {
     settings: { last_account: '', last_export_dir: '', data_root: '' },
     accountsRoot: '',
     accountsTried: [],
+    exportedAt: '',
   });
 
   const filter = reactive<FilterSpec>({
@@ -293,6 +298,7 @@ export function createStore(ipc: Ipc): AppStore {
     data.chats = [];
     data.stats = null;
     data.progress = null;
+    data.exportedAt = '';
     selection.reset();
   }
 
@@ -361,6 +367,16 @@ export function createStore(ipc: Ipc): AppStore {
     await scanAccounts();
   }
 
+  /** 记忆最近本地数据目录（docs/07 #2）：写 settings.last_export_dir（best-effort）。 */
+  async function rememberExportDir(dir: string): Promise<void> {
+    if (!dir) return;
+    try {
+      data.settings = await ipc.setSettings({ last_export_dir: dir });
+    } catch {
+      /* 记忆失败不打断交互 */
+    }
+  }
+
   async function init(): Promise<void> {
     try {
       const info = await ipc.appInfo();
@@ -416,11 +432,14 @@ export function createStore(ipc: Ipc): AppStore {
       data.chats = res.chats;
       data.stats = res.stats;
       data.source = res.source;
+      data.exportedAt = res.exported_at ?? '';
       data.loaded = true;
       // 对齐 Tk FilterTab.load_data() 末尾的 apply_filters()：加载完成即显示「匹配 N 条」
       // （只在成功路径置位；错误路径不置位，见下方 catch）
       data.filterApplied = true;
       selection.reset(); // 等价 Tk set_messages：清空选择 + 退多选
+      // 打开本地数据成功 → 记忆该目录（docs/07 #2；下次可一键回到）
+      if (params.kind === 'export') void rememberExportDir(params.out_dir);
     } catch (e) {
       data.error = toProtocolError(e);
     } finally {
@@ -466,6 +485,6 @@ export function createStore(ipc: Ipc): AppStore {
   return {
     ipc, data, filter, matched, selection, statusText,
     init, scanAccounts, setAccount, load, exportMessages, setFilter, resetFilter,
-    setDataRoot, queueResolveMedia, isDecodeFailed,
+    setDataRoot, rememberExportDir, queueResolveMedia, isDecodeFailed,
   };
 }

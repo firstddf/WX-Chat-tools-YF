@@ -18,11 +18,16 @@ export async function pickSavePath(suggestion: string): Promise<string | null> {
   return suggestion;
 }
 
-/** 目录选择（本地数据包导出 / 打开本地数据，docs/02 §2）；浏览器回固定路径便于断言 */
-export async function pickDir(): Promise<string | null> {
+/** 目录选择（本地数据包导出 / 打开本地数据，docs/02 §2）；浏览器回固定路径便于断言。
+ *  `defaultPath` = 最近使用的目录（docs/07 #2 记忆，打开时定位到上次位置）。 */
+export async function pickDir(defaultPath?: string): Promise<string | null> {
   if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
     try {
-      const p = await open({ directory: true, title: '选择目录' });
+      const p = await open({
+        directory: true,
+        title: '选择目录',
+        ...(defaultPath ? { defaultPath } : {}),
+      });
       return typeof p === 'string' ? p : null;
     } catch {
       return null;

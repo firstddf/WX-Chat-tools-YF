@@ -132,7 +132,14 @@ export class MockIpc implements Ipc {
     this.emitProgress({ phase: 'read_chats', done: 0, total, message: `读取会话 0/${total}` });
     const messages = this.messagesFor(source);
     this.emitProgress({ phase: 'read_chats', done: total, total, message: `读取会话 ${total}/${total}` });
-    return { source, chats: deriveChats(messages), messages, stats: deriveStats(messages) };
+    return {
+      source,
+      chats: deriveChats(messages),
+      messages,
+      stats: deriveStats(messages),
+      // export 来源给导出时间（信息卡断言用；store 来源省略键，与 sidecar 同口径）
+      ...(source === 'export' ? { exported_at: '2026-11-09 21:30:00' } : {}),
+    };
   }
 
   /**

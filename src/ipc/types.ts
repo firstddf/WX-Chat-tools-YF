@@ -86,6 +86,8 @@ export interface LoadResult {
   chats: Chat[];
   messages: Message[];
   stats: LoadStats;
+  /** export 来源且包内有导出报告/state 时给出：导出完成时间（信息卡用，docs/02 §1.3 2026-11-10） */
+  exported_at?: string;
 }
 
 /** FilterSpec —— 与 Tk guidata.filter_messages 语义逐字段一致 */
