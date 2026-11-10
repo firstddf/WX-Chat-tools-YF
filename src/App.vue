@@ -24,6 +24,15 @@ const banner = computed(() => {
   return '';
 });
 
+/** 启动骨架屏（R3 对策补完，docs/07 #8）：sidecar 还在 starting 且无数据/无错误时占位，
+ *  ready（或失败/出错）后切换为真实内容。 */
+const booting = computed(
+  () =>
+    store.data.sidecar.state === 'starting' &&
+    !store.data.loaded &&
+    !store.data.error,
+);
+
 function onToFilter(chatId: string): void {
   tab.value = 'filter';
   filterPanelRef.value?.focusChat(chatId);
@@ -38,8 +47,8 @@ function onOpenLocal(): void {
 
 <template>
   <div class="app">
-    <!-- 账号栏：位置对齐 Tk 版顶部（在标签页之上，两个标签页都可见） -->
-    <AccountBar />
+    <!-- 账号栏：位置对齐 Tk 版顶部（在标签页之上，两个标签页都可见）；starting 期灰化 -->
+    <AccountBar :class="{ 'boot-dim': booting }" />
 
     <div class="tabbar">
       <button
@@ -62,18 +71,26 @@ function onOpenLocal(): void {
 
     <div v-if="banner" class="banner" data-testid="sidecar_banner">{{ banner }}</div>
 
-    <div v-show="tab === 'filter'" class="tabpage" data-testid="page_filter">
-      <FilterPanel ref="filterPanelRef" @open-local="onOpenLocal" />
-      <MessageList
-        :items="store.matched.value"
-        :messages="store.data.messages"
-        :group-by-chat="true"
-        :selection="store.selection"
-      />
+    <!-- 启动骨架屏（docs/07 #8）：starting 期内容区占位，ready 后切换为标签页内容 -->
+    <div v-if="booting" class="boot-skeleton" data-testid="boot_skeleton">
+      <div class="skel-block skel-toolbar"></div>
+      <div v-for="i in 6" :key="i" class="skel-block skel-row" :style="{ width: `${94 - i * 6}%` }"></div>
     </div>
 
-    <div v-show="tab === 'manage'" class="tabpage" data-testid="page_manage">
-      <ChatList ref="chatListRef" @to-filter="onToFilter" />
-    </div>
+    <template v-else>
+      <div v-show="tab === 'filter'" class="tabpage" data-testid="page_filter">
+        <FilterPanel ref="filterPanelRef" @open-local="onOpenLocal" />
+        <MessageList
+          :items="store.matched.value"
+          :messages="store.data.messages"
+          :group-by-chat="true"
+          :selection="store.selection"
+        />
+      </div>
+
+      <div v-show="tab === 'manage'" class="tabpage" data-testid="page_manage">
+        <ChatList ref="chatListRef" @to-filter="onToFilter" />
+      </div>
+    </template>
   </div>
 </template>

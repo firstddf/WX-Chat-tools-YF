@@ -560,6 +560,30 @@ test('本地数据 Phase 2 #7 KEY_NOT_FOUND → 状态行「打开本地数据�
   await expect(page.getByTestId('btn_open_recent')).toBeVisible();
 });
 
+// ---------------------------------------------------------------- 启动骨架屏（docs/07 #8）
+
+test('启动骨架屏 #8 sidecar starting → 骨架占位 + 账号栏灰化，ready 后切换为内容', async ({
+  page,
+}) => {
+  // addInitScript 在模块加载前写入延迟 → appInfo 晚 900ms 就绪，starting 窗口可断言
+  await page.addInitScript(() => {
+    (window as unknown as { __MOCK_APPINFO_DELAY__: number }).__MOCK_APPINFO_DELAY__ = 900;
+  });
+  await page.goto('/');
+
+  const skel = page.getByTestId('boot_skeleton');
+  await expect(skel).toBeVisible();
+  await expect(page.getByTestId('account_bar')).toHaveClass(/boot-dim/);
+  // starting 期标签页内容未挂载（骨架占位而非半截内容）
+  await expect(page.getByTestId('page_filter')).toHaveCount(0);
+
+  // ready 后切换：骨架消失、内容挂载、账号栏恢复
+  await expect(skel).toHaveCount(0, { timeout: 5000 });
+  await expect(page.getByTestId('page_filter')).toBeVisible();
+  await expect(page.getByTestId('account_bar')).not.toHaveClass(/boot-dim/);
+  await expect(page.getByTestId('btn_load')).toBeVisible();
+});
+
 // ---------------------------------------------------------------- A2 #26
 
 test('A2 #26 管理页「在筛选中查找」→ 切页 + entry_chat 预填 + 结果只剩该会话', async ({ page }) => {

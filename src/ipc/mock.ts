@@ -99,6 +99,14 @@ export class MockIpc implements Ipc {
   }
 
   async appInfo(): Promise<AppInfo> {
+    // e2e 启动骨架屏（docs/07 #8）：addInitScript 在模块加载前写入
+    // window.__MOCK_APPINFO_DELAY__（ms）→ 就绪前 sidecar 停留 starting、骨架屏可见；
+    // 默认 0，不影响任何现有测试。
+    const extra =
+      typeof window !== 'undefined'
+        ? Number((window as Window & { __MOCK_APPINFO_DELAY__?: number }).__MOCK_APPINFO_DELAY__ ?? 0)
+        : 0;
+    if (extra > 0) await new Promise((r) => setTimeout(r, extra));
     await delay(this.latencyMs);
     this.fail('appInfo');
     return {

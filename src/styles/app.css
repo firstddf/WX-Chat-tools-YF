@@ -98,6 +98,48 @@ body {
   gap: 10px;
 }
 
+/* ---- 启动骨架屏（docs/07 #8，R3 对策补完） ---- */
+.app .accountbar.boot-dim {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.boot-skeleton {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #fff;
+}
+
+.skel-block {
+  background: linear-gradient(90deg, #eaecef 25%, #f6f8fa 37%, #eaecef 63%);
+  background-size: 400% 100%;
+  animation: skel-shimmer 1.4s ease-in-out infinite;
+  border-radius: 6px;
+  height: 20px;
+}
+
+.skel-toolbar {
+  height: 34px;
+  width: 45%;
+}
+
+.skel-row {
+  height: 46px;
+}
+
+@keyframes skel-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
 /* ---- 表单（移植 _FILTER_CSS） ---- */
 .f-panel {
   border: 1px solid #e1e4e8;
