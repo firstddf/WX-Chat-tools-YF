@@ -1,11 +1,13 @@
 <script setup lang="ts">
-// 应用外壳：账号栏（两个标签页共用）+ 标签页（数据筛选 / 聊天数据管理）+ sidecar 状态横幅 + store 装配。
+// 应用外壳：账号栏（三个标签页共用）+ 标签页（导出 / 数据筛选 / 聊天数据管理，顺序照 Tk
+// gui.py:103/158/160）+ sidecar 状态横幅 + store 装配。
 import { computed, onMounted, onUnmounted, provide, ref } from 'vue';
 import { useIpc } from './ipc/context';
 import { createStore, STORE_KEY } from './state/store';
 import AccountBar from './components/AccountBar.vue';
 import FilterPanel from './components/FilterPanel.vue';
 import ChatList from './components/ChatList.vue';
+import ExportPage from './components/ExportPage.vue';
 import MessageList from './components/MessageList.vue';
 
 const ipc = useIpc();
@@ -13,9 +15,11 @@ const store = createStore(ipc);
 provide(STORE_KEY, store);
 void store.init();
 
-const tab = ref<'filter' | 'manage'>('filter');
+// 默认激活页仍为「数据筛选」（docs/07 #17 拍板 A5）：43 条 e2e 与真机脚本的隐式默认页口径
+const tab = ref<'export' | 'filter' | 'manage'>('filter');
 const filterPanelRef = ref<InstanceType<typeof FilterPanel> | null>(null);
 const chatListRef = ref<InstanceType<typeof ChatList> | null>(null);
+const exportPageRef = ref<InstanceType<typeof ExportPage> | null>(null);
 
 const banner = computed(() => {
   const state = store.data.sidecar.state;
@@ -45,17 +49,17 @@ function onOpenLocal(): void {
 }
 
 /**
- * 管理页 Ctrl/Cmd+A = 全选导出会话（docs/07 #14 追加，2026-11-11 用户反馈）：
+ * 导出页 Ctrl/Cmd+A = 全选导出会话（docs/07 #14 追加 → #17 随面板迁到导出页）：
  * 吞掉浏览器「整页全选」默认行为（网页版会把工具栏/面板整片框蓝，Tk 是 Canvas 无此现象）。
- * 输入框内不劫持（照常全选框内文字）；面板收起时由 ChatList 返回未消费 → 默认行为
+ * 输入框内不劫持（照常全选框内文字）；其余页签不消费 → 默认行为
  * （配合骨架 user-select:none，只会选中消息正文，不再满屏蓝）。
  */
 function onKeydown(e: KeyboardEvent): void {
-  if (tab.value !== 'manage') return;
+  if (tab.value !== 'export') return;
   if (e.key.toLowerCase() !== 'a' || !(e.ctrlKey || e.metaKey)) return;
   const t = e.target as HTMLElement | null;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-  if (chatListRef.value?.handleCtrlA()) e.preventDefault();
+  if (exportPageRef.value?.handleCtrlA()) e.preventDefault();
 }
 
 onMounted(() => window.addEventListener('keydown', onKeydown));
@@ -68,6 +72,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
     <AccountBar :class="{ 'boot-dim': booting }" />
 
     <div class="tabbar">
+      <button
+        type="button"
+        :class="{ active: tab === 'export' }"
+        data-testid="tab_export"
+        @click="tab = 'export'"
+      >
+        导出
+      </button>
       <button
         type="button"
         :class="{ active: tab === 'filter' }"
@@ -95,6 +107,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
     </div>
 
     <template v-else>
+      <div v-show="tab === 'export'" class="tabpage" data-testid="page_export">
+        <ExportPage ref="exportPageRef" />
+      </div>
+
       <div v-show="tab === 'filter'" class="tabpage" data-testid="page_filter">
         <FilterPanel ref="filterPanelRef" @open-local="onOpenLocal" />
         <MessageList

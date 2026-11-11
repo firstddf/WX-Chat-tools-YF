@@ -389,12 +389,14 @@ test('本地数据 #1 导出本地数据包：bundle 参数（无 scope、目录
 }) => {
   await gotoLocal(page);
   await load(page);
-  await page.getByTestId('tab_manage').click();
-  const manage = page.getByTestId('page_manage');
+  await page.getByTestId('tab_export').click();
+  const exp = page.getByTestId('page_export');
 
   // 浏览器 dev 的目录选择回固定路径（ipc/dialog.ts pickDir）
-  await manage.getByTestId('btn_export_bundle').click();
-  await expect(manage.getByTestId('manage_notice')).toContainText('已导出数据包 8 条 → C:/mock/local-data');
+  await exp.getByTestId('btn_export_bundle').click();
+  await expect(exp.getByTestId('export_notice')).toContainText('已导出数据包 8 条 → C:/mock/local-data');
+  // 日志框（docs/07 #17，Tk 底部「日志」等价）记录同一事件
+  await expect(exp.getByTestId('export_log')).toContainText('已导出数据包 8 条 → C:/mock/local-data');
 
   const { exports } = await localCalls(page);
   const calls = exports as Array<{ format: string; scope?: unknown; out_path: string }>;
@@ -405,8 +407,8 @@ test('本地数据 #1 导出本地数据包：bundle 参数（无 scope、目录
 
   // 完成后出现「打开导出目录」→ revealPath 收到数据包根
   //（注意：localCalls 是 evaluate 的结构化快照，必须点击**后**再取）
-  await expect(manage.getByTestId('btn_reveal_bundle')).toBeVisible();
-  await manage.getByTestId('btn_reveal_bundle').click();
+  await expect(exp.getByTestId('btn_reveal_bundle')).toBeVisible();
+  await exp.getByTestId('btn_reveal_bundle').click();
   const after = await localCalls(page);
   expect(after.reveals).toEqual(['C:/mock/local-data']);
 });
@@ -457,9 +459,9 @@ test('本地数据 #3 回读数据驱动全链路：筛选在 export 来源下�
   await expect(status(page)).toContainText('来源：导出目录');
 });
 
-// ---------------------------------------------- 导出设置面板（docs/07 #14，2026-11-11）
+// ------------------------------------------- 导出页（docs/07 #17；参数面承 #14，2026-11-11）
 
-/** 期望的起止时间戳（与 ChatList.dayToTs 同算法：起=当天 00:00:00、止=当天 23:59:59） */
+/** 期望的起止时间戳（与 ExportPage.dayToTs 同算法：起=当天 00:00:00、止=当天 23:59:59） */
 function dayBounds(fromDay: Date, toDay: Date): { start_ts: number; end_ts: number } {
   const start = new Date(fromDay.getFullYear(), fromDay.getMonth(), fromDay.getDate());
   const end = new Date(toDay.getFullYear(), toDay.getMonth(), toDay.getDate());
@@ -467,70 +469,77 @@ function dayBounds(fromDay: Date, toDay: Date): { start_ts: number; end_ts: numb
   return { start_ts: Math.floor(start.getTime() / 1000), end_ts: Math.floor(end.getTime() / 1000) - 1 };
 }
 
-test('导出设置 #14 面板参数透传：会话子集/时间范围/include/artifacts/incremental + 空选拦截', async ({
+test('导出页 #17 布局 + 参数透传：会话子集/时间范围/include/artifacts/incremental + 空选拦截', async ({
   page,
 }) => {
   await gotoLocal(page);
   await load(page);
-  await page.getByTestId('tab_manage').click();
-  const manage = page.getByTestId('page_manage');
+  await page.getByTestId('tab_export').click();
+  const exp = page.getByTestId('page_export');
 
-  // 面板**默认展开**（2026-11-11 反馈：对齐 Tk 常驻卡片）；收起/再展开仍可用，
-  // 展开态会话默认全选（缺省语义）+ 树行出现勾选框
-  await expect(manage.getByTestId('export_settings')).toBeVisible();
-  await manage.getByTestId('btn_export_settings').click(); // 收起
-  await expect(manage.getByTestId('export_settings')).toHaveCount(0);
-  await manage.getByTestId('btn_export_settings').click(); // 重新展开
-  await expect(manage.getByTestId('export_settings')).toBeVisible();
-  await expect(manage.getByTestId('exp_chat_count')).toContainText(
+  // 页签顺序照 Tk（导出 → 数据筛选 → 聊天数据管理，gui.py:103/158/160）
+  const tabs = page.locator('.tabbar button');
+  await expect(tabs.nth(0)).toHaveText('导出');
+  await expect(tabs.nth(1)).toHaveText('数据筛选');
+  await expect(tabs.nth(2)).toHaveText('聊天数据管理');
+
+  // 三段布局（A1）：左 = 会话勾选列表、右 =「导出设置」卡、底 = 动作条 + 日志框
+  await expect(exp.getByTestId('exp_chat_tree')).toBeVisible();
+  await expect(exp.getByTestId('export_settings')).toBeVisible();
+  await expect(exp.getByTestId('export_log')).toBeVisible();
+  await expect(exp.getByTestId('btn_export_start')).toBeVisible();
+
+  // 会话默认全选（缺省语义）+ 列表行出现勾选框
+  await expect(exp.getByTestId('exp_chat_count')).toContainText(
     `已选 ${FIXTURE_CHATS.length}/${FIXTURE_CHATS.length}`,
   );
-  const checks = manage.getByTestId('chat_check');
+  const checks = exp.getByTestId('exp_chat_check');
   await expect(checks).toHaveCount(FIXTURE_CHATS.length);
   expect(
     await checks.evaluateAll((els) => els.map((e) => (e as HTMLInputElement).checked)),
   ).toEqual([true, true, true]);
 
   // 清空 → 开始导出被本地拦下（Tk showwarning 同款文案），不产生请求
-  await manage.getByTestId('btn_exp_none').click();
-  await expect(manage.getByTestId('exp_chat_count')).toContainText('已选 0/');
-  await manage.getByTestId('btn_export_start').click();
-  await expect(manage.getByTestId('manage_notice')).toContainText('请至少选择一个会话');
+  await exp.getByTestId('btn_exp_none').click();
+  await expect(exp.getByTestId('exp_chat_count')).toContainText('已选 0/');
+  await exp.getByTestId('btn_export_start').click();
+  await expect(exp.getByTestId('export_notice')).toContainText('请至少选择一个会话');
   expect(await exportCalls(page)).toHaveLength(0);
 
-  // Ctrl+A = 全选会话（吞掉浏览器整页全选；App 在管理页转发给面板）
+  // Ctrl+A = 全选会话（吞掉浏览器整页全选；App 在导出页转发，#17 随面板迁页）
   await page.keyboard.press('Control+A');
-  await expect(manage.getByTestId('exp_chat_count')).toContainText(
+  await expect(exp.getByTestId('exp_chat_count')).toContainText(
     `已选 ${FIXTURE_CHATS.length}/${FIXTURE_CHATS.length}`,
   );
 
   // 全选 → 反选往返（同 Tk 全选/清空/反选三按钮）
-  await manage.getByTestId('btn_exp_all').click();
-  await manage.getByTestId('btn_exp_invert').click();
-  await expect(manage.getByTestId('exp_chat_count')).toContainText('已选 0/');
-  await manage.getByTestId('btn_exp_invert').click();
-  await expect(manage.getByTestId('exp_chat_count')).toContainText(
+  await exp.getByTestId('btn_exp_all').click();
+  await exp.getByTestId('btn_exp_invert').click();
+  await expect(exp.getByTestId('exp_chat_count')).toContainText('已选 0/');
+  await exp.getByTestId('btn_exp_invert').click();
+  await expect(exp.getByTestId('exp_chat_count')).toContainText(
     `已选 ${FIXTURE_CHATS.length}/${FIXTURE_CHATS.length}`,
   );
 
-  // 取消树首行会话 → 子集只剩后两个
+  // 取消列表首行会话 → 子集只剩后两个
   await checks.nth(0).click();
-  await expect(manage.getByTestId('exp_chat_count')).toContainText(
+  await expect(exp.getByTestId('exp_chat_count')).toContainText(
     `已选 ${FIXTURE_CHATS.length - 1}/${FIXTURE_CHATS.length}`,
   );
 
   // 时间范围快捷按钮（近7天）+ 内容类型去掉图片 + 生成物去掉 csv（增量保持默认勾选）
-  await manage.getByTestId('exp_quick_7').click();
-  await manage.getByTestId('var_include_image').uncheck();
-  await manage.getByTestId('var_artifact_csv').uncheck();
+  await exp.getByTestId('exp_quick_7').click();
+  await exp.getByTestId('var_include_image').uncheck();
+  await exp.getByTestId('var_artifact_csv').uncheck();
 
   // 输出目录（浏览器 dev 的 pickDir 固定路径）→ 开始导出
-  await manage.getByTestId('btn_exp_browse').click();
-  await expect(manage.getByTestId('entry_exp_dir')).toHaveValue('C:/mock/local-data');
-  await manage.getByTestId('btn_export_start').click();
-  await expect(manage.getByTestId('manage_notice')).toContainText(
+  await exp.getByTestId('btn_exp_browse').click();
+  await expect(exp.getByTestId('entry_exp_dir')).toHaveValue('C:/mock/local-data');
+  await exp.getByTestId('btn_export_start').click();
+  await expect(exp.getByTestId('export_notice')).toContainText(
     `已导出数据包 ${FIXTURE_MESSAGES.length} 条 → C:/mock/local-data`,
   );
+  await expect(exp.getByTestId('export_log')).toContainText('开始导出（选择性）');
 
   const calls = (await exportCalls(page)) as Array<{
     format: string;
@@ -558,25 +567,25 @@ test('导出设置 #14 面板参数透传：会话子集/时间范围/include/ar
   });
 });
 
-test('导出设置 #14 增量完成文案：同目录二跑 → 「增量导出完成：新增 0 条」（同 Tk gui.py）', async ({
+test('导出页 #17 增量完成文案：同目录二跑 → 「增量导出完成：新增 0 条」（同 Tk gui.py）', async ({
   page,
 }) => {
   await gotoLocal(page);
   await load(page);
-  await page.getByTestId('tab_manage').click();
-  const manage = page.getByTestId('page_manage');
-  await expect(manage.getByTestId('export_settings')).toBeVisible(); // 默认展开（2026-11-11）
-  await manage.getByTestId('btn_exp_browse').click();
+  await page.getByTestId('tab_export').click();
+  const exp = page.getByTestId('page_export');
+  await expect(exp.getByTestId('export_settings')).toBeVisible(); // 独立页签常驻（#17）
+  await exp.getByTestId('btn_exp_browse').click();
 
   // 首跑：目录无 state → mode=full → 现行文案
-  await manage.getByTestId('btn_export_start').click();
-  await expect(manage.getByTestId('manage_notice')).toContainText(
+  await exp.getByTestId('btn_export_start').click();
+  await expect(exp.getByTestId('export_notice')).toContainText(
     `已导出数据包 ${FIXTURE_MESSAGES.length} 条`,
   );
 
   // 二跑：同目录 + 增量默认勾 → mode=incremental → 增量文案（分文案靠 result.mode）
-  await manage.getByTestId('btn_export_start').click();
-  await expect(manage.getByTestId('manage_notice')).toContainText(
+  await exp.getByTestId('btn_export_start').click();
+  await expect(exp.getByTestId('export_notice')).toContainText(
     '增量导出完成：新增 0 条 → C:/mock/local-data',
   );
 
