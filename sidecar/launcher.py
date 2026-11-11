@@ -45,6 +45,11 @@ MAX_FRAME = int(os.environ.get("WXCHART_SIDECAR_MAX_FRAME", str(64 * 1024 * 1024
 # 附件解析范围（与 Tk gui.py `_load_gui_worker` 完全一致：只为预览解析这四类）
 MEDIA_INCLUDE = {"image", "file", "video", "voice"}
 
+# bundle `options` 白名单（docs/02 §1.2 2026-11-10 #14 冻结：未知键/非预期类型 → INTERNAL）
+BUNDLE_OPTION_KEYS = ("chats", "start_ts", "end_ts", "include", "artifacts", "incremental")
+INCLUDE_TYPES = ("text", "image", "file", "video", "voice")   # include 归一恒含 text（同 Tk）
+ARTIFACT_KEYS = ("html", "csv", "media_index", "date_index")
+
 __all__ = ["NdjsonWriter", "Sidecar", "run", "main"]
 
 
@@ -240,6 +245,9 @@ class Sidecar:
         + 导出报告（三方格式一致，回读走既有 ``load_source kind=export``）。
         重开解密库（KeySet 持有、缓存命中不解密）并挂**真实** MediaResolver——
         与 Tk ``start_export`` 同款，附件在导出迭代中照常解码复制。
+
+        可选 ``options``（docs/02 §1.2 2026-11-10 #14 冻结）：整体可省 = 全量行为；
+        白名单逐键校验，未知键/非预期类型 → ``INTERNAL``（先于开库校验，快速失败）。
         """
         out_path = params.get("out_path")
         if not isinstance(out_path, str) or not out_path:
@@ -253,6 +261,7 @@ class Sidecar:
         if ctx is None:
             raise SidecarError(
                 "INTERNAL", "数据包导出仅支持扫描加载的数据（导出目录来源请重新扫描）")
+        opt = self._bundle_options(params.get("options"), ctx["chats"])
 
         def on_progress(message: str, pct: float) -> None:
             # exporter 进度（0-100）→ 协议 progress 通知（docs/02 §1.2 export_bundle）
@@ -276,7 +285,14 @@ class Sidecar:
                     # 同 Tk start_export（gui.py:463）：真实解析器，附件解码复制
                     store.__dict__["_media_resolver"] = resolver
                 report = exporter.export(
-                    ctx["account"], store, ctx["chats"], out_dir=root,
+                    ctx["account"], store, opt["chats"], out_dir=root,
+                    start_ts=opt["start_ts"], end_ts=opt["end_ts"],
+                    include=opt["include"],
+                    html=opt["artifacts"].get("html", True),
+                    csv=opt["artifacts"].get("csv", True),
+                    media_index=opt["artifacts"].get("media_index", True),
+                    date_index=opt["artifacts"].get("date_index", True),
+                    incremental=opt["incremental"],
                     progress=on_progress,
                 )
             except ValueError as exc:
@@ -289,6 +305,79 @@ class Sidecar:
         finally:
             store.close()
         return mapping.bundle_result(root, report)
+
+    def _bundle_options(self, options: Any, chats: list[Any]) -> dict[str, Any]:
+        """bundle ``options`` 白名单校验 + 归一化（docs/02 §1.2 2026-11-10 #14 冻结）。
+
+        未知键 / 非预期类型 → ``INTERNAL``（message 指明字段，同 ``set_settings``
+        防静默丢失口径）。返回 exporter 参数面：``chats`` 过滤后的会话子集、
+        ``include`` 恒含 ``text``（同 Tk gui.py:448）、``artifacts`` 缺键即 exporter
+        默认 ``True``。``options`` 整体可省 = Phase 1 全量行为。
+        """
+        if options is None:
+            options = {}
+        if not isinstance(options, dict):
+            raise SidecarError("INTERNAL", "options 非预期类型（应为对象）")
+        for key in options:
+            if key not in BUNDLE_OPTION_KEYS:
+                raise SidecarError("INTERNAL", f"options 未知字段: {key}")
+        out: dict[str, Any] = {
+            "chats": chats, "start_ts": 0, "end_ts": 0,
+            "include": None, "artifacts": {}, "incremental": False,
+        }
+        if "chats" in options:
+            sel = options["chats"]
+            if not isinstance(sel, list) or any(not isinstance(x, str) for x in sel):
+                raise SidecarError(
+                    "INTERNAL", "options.chats 非预期类型（应为字符串数组）")
+            if not sel:
+                raise SidecarError("INTERNAL", "options.chats 未选择会话")
+            known = {str(getattr(c, "username", "") or "") for c in chats}
+            unknown = sorted({x for x in sel if x not in known})
+            if unknown:
+                raise SidecarError("INTERNAL", f"options.chats 含未知会话: {unknown[0]}")
+            wanted = set(sel)
+            out["chats"] = [
+                c for c in chats if str(getattr(c, "username", "") or "") in wanted]
+        for key in ("start_ts", "end_ts"):
+            if key in options:
+                value = options[key]
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise SidecarError(
+                        "INTERNAL", f"options.{key} 非预期类型（应为整数）")
+                out[key] = value
+        if out["start_ts"] and out["end_ts"] and out["start_ts"] > out["end_ts"]:
+            raise SidecarError("INTERNAL", "options.start_ts 晚于 end_ts（时间范围倒置）")
+        if "include" in options:
+            inc = options["include"]
+            if not isinstance(inc, list) or any(not isinstance(x, str) for x in inc):
+                raise SidecarError(
+                    "INTERNAL", "options.include 非预期类型（应为字符串数组）")
+            unknown = sorted({x for x in inc if x not in INCLUDE_TYPES})
+            if unknown:
+                raise SidecarError(
+                    "INTERNAL", f"options.include 含未知类型: {unknown[0]}")
+            out["include"] = set(inc) | {"text"}   # 归一化恒含 text（同 Tk）
+        if "artifacts" in options:
+            art = options["artifacts"]
+            if not isinstance(art, dict):
+                raise SidecarError(
+                    "INTERNAL", "options.artifacts 非预期类型（应为对象）")
+            for key, value in art.items():
+                if key not in ARTIFACT_KEYS:
+                    raise SidecarError(
+                        "INTERNAL", f"options.artifacts 未知字段: {key}")
+                if not isinstance(value, bool):
+                    raise SidecarError(
+                        "INTERNAL",
+                        f"options.artifacts.{key} 非预期类型（应为布尔）")
+            out["artifacts"] = dict(art)          # 缺键 = True（exporter 默认）
+        if "incremental" in options:
+            if not isinstance(options["incremental"], bool):
+                raise SidecarError(
+                    "INTERNAL", "options.incremental 非预期类型（应为布尔）")
+            out["incremental"] = options["incremental"]
+        return out
 
     def _bundle_resolver(self, ctx: dict[str, Any]) -> Any | None:
         """数据包导出的附件解析器：优先复用加载期真实例（图片密钥已备）；

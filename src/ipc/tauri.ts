@@ -67,6 +67,8 @@ export class TauriIpc implements Ipc {
         // bundle 不带 scope → null（壳 Value 收下，sidecar 校验非 null 即拒，docs/02 §1.2）
         scope: params.scope ?? null,
         outPath: params.out_path, // camelCase 键（docs/02 §2 2026-11-09 实测注）
+        // 选择性/增量参数（#14，docs/02 §1.2）：仅 bundle 传，壳只在 bundle 时转发
+        options: params.format === 'bundle' ? (params.options ?? null) : null,
       });
     } catch (e) {
       throw asProtocolError(e);

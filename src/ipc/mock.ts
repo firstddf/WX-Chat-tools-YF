@@ -70,6 +70,8 @@ export class MockIpc implements Ipc {
   private cache = new Map<string, Message[]>();
   private progressCbs = new Set<(p: ProgressParams) => void>();
   private statusCbs = new Set<(s: SidecarStatus) => void>();
+  /** 已导出过的数据包目录（export_state 等价物：同目录二跑才可能 incremental） */
+  private bundleDirs = new Set<string>();
 
   constructor(opts: MockIpcOptions = {}) {
     this.errors = { ...opts.errors };
@@ -177,12 +179,23 @@ export class MockIpc implements Ipc {
     await delay(this.latencyMs);
     this.fail('exportMessages');
     const messages = this.cache.get(`store:${this.messageCount}`) ?? this.messagesFor('store');
-    // bundle = 本地数据包（全量，docs/02 §1.2）：count 回全量、进度 phase 对齐 sidecar
+    // bundle = 本地数据包（docs/02 §1.2）：count 回全量、进度 phase 对齐 sidecar；
+    // mode/new_messages 同 exporter 语义——incremental 且该目录已有数据包才判 incremental
     if (params.format === 'bundle') {
       this.emitProgress({
         phase: 'export_bundle', done: 100, total: 100, message: '导出数据包 100%',
       });
-      return { path: params.out_path, count: messages.length, bytes: Math.max(messages.length, 1) * 180 };
+      const incremental =
+        Boolean(params.options?.incremental) && this.bundleDirs.has(params.out_path);
+      this.bundleDirs.add(params.out_path);
+      return {
+        path: params.out_path,
+        count: messages.length,
+        bytes: Math.max(messages.length, 1) * 180,
+        mode: incremental ? 'incremental' : 'full',
+        // mock 不造新消息：增量回 0（完成文案「新增 0 条」）
+        newMessages: incremental ? 0 : messages.length,
+      };
     }
     const count = params.scope?.type === 'indexes'
       ? params.scope.indexes.length

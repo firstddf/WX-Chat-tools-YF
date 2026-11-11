@@ -1,7 +1,7 @@
 //! 通道①：前端 → Tauri invoke 命令（docs/02 §2）。
 //! 命令名与参数名必须与 `src/ipc/tauri.ts` 逐字一致：
 //! `app_info` / `scan_accounts` / `load_data{kind,account,out_dir,options}` /
-//! `export_messages{format,scope,out_path}` / `resolve_media{indexes}` /
+//! `export_messages{format,scope,out_path,options}` / `resolve_media{indexes}` /
 //! `doctor{}` / `open_path{path}` / `reveal_path{path}`。
 //! 全部返回 `Result<T, AppError>`，拒绝值即前端 ProtocolError `{code,message,detail?}`。
 
@@ -115,12 +115,15 @@ pub async fn load_data(
 /// `out_path` 由前端先经 `plugin:dialog|save` 取得（docs/03 §5.3）；
 /// `format:"bundle"`（本地数据包，docs/02 §1.2 2026-11-09）时 scope 省略（传 null）、
 /// `out_path` 为目录——成功后数据包根进 PathScope **与 asset 协议 scope**
-/// （包内图片缩略图可显示）。
+/// （包内图片缩略图可显示）。`options` 为 2026-11-10 #14 增补的选择性/增量参数，
+/// **仅 bundle 转发**（json/csv 不带，docs/02 §1.2）；result 的 `new_messages`
+/// 按 §2 冻结形状改键为 `newMessages`（mode 不变）。
 #[tauri::command]
 pub async fn export_messages(
     format: String,
     scope: Value,
     out_path: String,
+    options: Option<Value>,
     app: tauri::AppHandle,
     manager: State<'_, SidecarManager>,
 ) -> Result<Value, AppError> {
@@ -140,10 +143,21 @@ pub async fn export_messages(
         .parent()
         .map(|p| p.to_string_lossy().into_owned());
 
-    let params = json!({ "format": format, "scope": scope, "out_path": out_path });
-    let result = manager.call("export", params, EXPORT_TIMEOUT).await?;
+    let mut params = json!({ "format": format, "scope": scope, "out_path": out_path });
+    if is_bundle {
+        if let Some(o) = options {
+            params["options"] = o;
+        }
+    }
+    let mut result = manager.call("export", params, EXPORT_TIMEOUT).await?;
 
     if is_bundle {
+        // §2 冻结形状：sidecar 回 snake_case `new_messages` → 前端 camelCase `newMessages`
+        if let Some(obj) = result.as_object_mut() {
+            if let Some(v) = obj.remove("new_messages") {
+                obj.insert("newMessages".to_string(), v);
+            }
+        }
         // 数据包根（不是父目录）：PathScope 前缀 + asset 协议放行（docs/02 §2）
         manager.add_export_root(&out_path);
         app.asset_protocol_scope()

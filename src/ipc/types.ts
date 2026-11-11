@@ -107,6 +107,34 @@ export interface ExportResult {
   path: string;
   count: number;
   bytes: number;
+  /** bundle 专属（docs/02 §1.2 2026-11-10 #14）：full | incremental；exporter 按有无 state 判定 */
+  mode?: 'full' | 'incremental';
+  /** 本次报告新增条数（mode=incremental 时前端出「新增 N 条」文案） */
+  newMessages?: number;
+}
+
+/**
+ * bundle `options`（docs/02 §1.2 2026-11-10 冻结，2026-11-11 实现）——
+ * **整体可省 = 全量行为**；未知键/非预期类型由 sidecar 拒为 INTERNAL。
+ * 字段名与协议逐字一致（snake_case，仅壳命令参数是 camelCase）。
+ */
+export interface BundleOptions {
+  /** 会话子集（chat_id == chat.username，guidata._from_message:185）；缺省=全部 */
+  chats?: string[];
+  /** 时间范围 unix 秒闭区间，0=不限；start_ts>end_ts（均非 0）→ INTERNAL */
+  start_ts?: number;
+  end_ts?: number;
+  /** 正文类型子集；缺省=五类，sidecar 归一恒含 "text" */
+  include?: string[];
+  /** 生成物开关；给了对象则逐键覆盖、缺键=true */
+  artifacts?: {
+    html?: boolean;
+    csv?: boolean;
+    media_index?: boolean;
+    date_index?: boolean;
+  };
+  /** 增量导出（同目录同账号才生效，跳过无新消息会话） */
+  incremental?: boolean;
 }
 
 /**
@@ -194,6 +222,8 @@ export interface ExportParams {
   /** json/csv 必填；bundle 不带（传 undefined → 壳转 null，sidecar 拒绝非 null） */
   scope?: Scope;
   out_path: string;
+  /** 仅 bundle 有意义（#14 选择性/增量）；缺省 = Phase 1 全量行为 */
+  options?: BundleOptions;
 }
 
 // ---------------------------------------------------------------- Ipc 接口（docs/02 §6）

@@ -641,7 +641,7 @@ def fake_resolver_cls(index=None, *, on_resolve=None, capture=None, events=None)
 
 
 def run_store_load(sc, msgs, *, options=None, work_dir=None, resolver_cls=None,
-                   events=None, stack=None):
+                   events=None, stack=None, chats=None):
     """mock 跑一次 load_source(kind=store)；FakeStore 复刻 model.iter_messages 的媒体钩子。
 
     返回 holder：``{"result", "store", "account", "resolver_at_iter"}``。
@@ -704,7 +704,7 @@ def run_store_load(sc, msgs, *, options=None, work_dir=None, resolver_cls=None,
         cfg.resolve_self_username.return_value = "wxid_fake"
         keys_mod.extract_keys.return_value = object()
         model_mod.load_contacts.return_value = {}
-        model_mod.load_chats.return_value = [FakeChat()]
+        model_mod.load_chats.return_value = list(chats) if chats else [FakeChat()]
         params: dict = {"kind": "store"}
         if options is not None:
             params["options"] = options
@@ -1125,20 +1125,26 @@ def test_export_backfills_undecoded_images() -> None:
 
 # ---------------------------------------------------------------- 本地数据包 bundle（docs/02 §1.2 / docs/06 Phase 1）
 
-def _run_bundle(sc, msgs, out, *, work_dir, resolver_cls=None):
+def _run_bundle(sc, msgs, out, *, work_dir, resolver_cls=None, options=None,
+                chats=None):
     """同一补丁窗口内跑 load_source(kind=store) + export(format=bundle)。
 
     返回 (load_result, bundle_result)；补丁在 bundle 应答后才撤
     （bundle 要重开 Store——Store/config/keys/model 必须仍是替身）。
+    ``options`` 透传给 export（docs/02 §1.2 2026-11-10 #14）；``chats`` 覆盖
+    ``model.load_chats`` 返回的会话清单（多会话子集用例）。
     """
     with ExitStack() as stack:
         holder = run_store_load(sc, msgs, options={"resolve_media": True},
                                 work_dir=work_dir, resolver_cls=resolver_cls,
-                                stack=stack)
+                                stack=stack, chats=chats)
         buf: io.StringIO = sc._writer.stream          # type: ignore[attr-defined]
         buf.seek(0)
         buf.truncate(0)                               # 只断言 bundle 期间的 progress
-        res = sc.handle("export", {"format": "bundle", "out_path": str(out)})
+        params: dict = {"format": "bundle", "out_path": str(out)}
+        if options is not None:
+            params["options"] = options
+        res = sc.handle("export", params)
     return holder, res
 
 
@@ -1232,6 +1238,199 @@ def test_export_bundle_before_load_source_unavailable() -> None:
             raise AssertionError("未加载打包应抛 SOURCE_UNAVAILABLE")
         except mapping.SidecarError as exc:
             assert exc.code == "SOURCE_UNAVAILABLE"
+
+
+# ------------------------------------ 选择性 + 增量数据包 options（docs/07 #14）
+
+class _ChatA:
+    """会话替身：username 即 load_source 结果的 chat_id（guidata._from_message:185）。"""
+
+    username = "48025936916@chatroom"
+    display_name = "测试群"
+    is_group = True
+
+
+class _ChatB:
+    username = "wxid_other"
+    display_name = "其他会话"
+    is_group = False
+
+
+def test_export_bundle_options_whitelist() -> None:
+    """options 白名单（docs/02 §1.2 2026-11-10 #14 冻结）：
+    未知键 / 非预期类型 → INTERNAL，且 message 指明字段（同 set_settings 口径）。"""
+    cases = [
+        ({"foo": 1}, "foo"),                          # 未知选项键
+        ([], "options"),                              # options 整体非对象
+        ({"chats": "48025936916@chatroom"}, "chats"),  # 会话子集不是数组
+        ({"start_ts": "1793676480"}, "start_ts"),     # 时间不是整数
+        ({"include": "text"}, "include"),             # 类型子集不是数组
+        ({"include": ["bogus"]}, "bogus"),            # 未知正文类型
+        ({"artifacts": {"htm": True}}, "htm"),        # 未知生成物键
+        ({"artifacts": {"csv": 1}}, "csv"),           # 生成物值非布尔
+        ({"incremental": "yes"}, "incremental"),      # 增量位非布尔
+    ]
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        msgs = [FakeRaw("text", text="你好", local_id=1)]
+        run_store_load(sc, msgs, work_dir=tmp_path / "work")
+        for index, (bad, needle) in enumerate(cases):
+            try:
+                sc.handle("export", {"format": "bundle",
+                                     "out_path": str(tmp_path / f"pkg{index}"),
+                                     "options": bad})
+                raise AssertionError(f"options={bad!r} 应抛 INTERNAL")
+            except mapping.SidecarError as exc:
+                assert exc.code == "INTERNAL", (bad, exc.code, exc.message)
+                assert needle in exc.message, (bad, exc.message)
+
+
+def test_export_bundle_options_chats_subset() -> None:
+    """options.chats：只导所选会话子集；显式 [] → 未选择会话、未知 id → 指明 id。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        msgs = [FakeRaw("text", text="子集导出", local_id=1)]
+        chats = [_ChatA(), _ChatB()]
+
+        # 子集：只选 B → 只有 B 的会话目录落盘
+        _, res = _run_bundle(sc, msgs, tmp_path / "pkg-b",
+                             work_dir=tmp_path / "work",
+                             resolver_cls=fake_resolver_cls(),
+                             options={"chats": ["wxid_other"]}, chats=chats)
+        out = Path(res["path"])
+        assert (out / "其他会话_wxid_other" / "索引.html").is_file(), list(out.iterdir())
+        assert not (out / "测试群_48025936916@chatroom").exists()
+
+        for bad, needle in (([], "未选择会话"), (["nobody@chatroom"], "nobody@chatroom")):
+            try:
+                sc.handle("export", {"format": "bundle",
+                                     "out_path": str(tmp_path / "pkg-bad"),
+                                     "options": {"chats": bad}})
+                raise AssertionError(f"chats={bad!r} 应抛 INTERNAL")
+            except mapping.SidecarError as exc:
+                assert exc.code == "INTERNAL" and needle in exc.message, exc.message
+
+
+def test_export_bundle_options_time_range_and_include() -> None:
+    """start_ts/end_ts 闭区间过滤（0=不限）与倒置拒绝；include 归一恒含 text（同 Tk）。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        early = FakeRaw("text", text="早消息", local_id=1)
+        late = FakeRaw("text", text="晚消息", local_id=2)
+        late.create_time = early.create_time + 86400
+        pair = [early, late]
+
+        # 只给 start_ts → 之后（含端点）的 1 条
+        _, res = _run_bundle(sc, pair, tmp_path / "pkg-from",
+                             work_dir=tmp_path / "work",
+                             resolver_cls=fake_resolver_cls(),
+                             options={"start_ts": early.create_time + 1})
+        assert res["count"] == 1, res
+        # 只给 end_ts → 之前（含端点）的 1 条
+        _, res2 = _run_bundle(sc, pair, tmp_path / "pkg-to",
+                              work_dir=tmp_path / "work",
+                              resolver_cls=fake_resolver_cls(),
+                              options={"end_ts": early.create_time})
+        assert res2["count"] == 1, res2
+
+        # 时间倒置（均非 0）→ INTERNAL
+        try:
+            sc.handle("export", {"format": "bundle",
+                                 "out_path": str(tmp_path / "pkg-flip"),
+                                 "options": {"start_ts": 100, "end_ts": 50}})
+            raise AssertionError("时间倒置应抛 INTERNAL")
+        except mapping.SidecarError as exc:
+            assert exc.code == "INTERNAL" and "倒置" in exc.message, exc.message
+
+        # include 归一恒含 text：只给 file → 文字保留、图片被滤（2 条 → 1 条）
+        _, res3 = _run_bundle(sc, [FakeRaw("text", text="保留", local_id=4),
+                                   FakeRaw("image", local_id=5)],
+                              tmp_path / "pkg-inc",
+                              work_dir=tmp_path / "work",
+                              resolver_cls=fake_resolver_cls(),
+                              options={"include": ["file"]})
+        assert res3["count"] == 1, res3
+
+
+def test_export_bundle_options_artifacts() -> None:
+    """artifacts 逐键覆盖、缺键=True：关 csv → 无 消息.csv；关 html → 无 索引.html。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        msgs = [FakeRaw("text", text="生成物开关", local_id=1)]
+
+        _, res = _run_bundle(sc, msgs, tmp_path / "pkg-nocsv",
+                             work_dir=tmp_path / "work",
+                             resolver_cls=fake_resolver_cls(),
+                             options={"artifacts": {"csv": False}})
+        out = Path(res["path"])
+        assert (out / "测试群_48025936916@chatroom" / "索引.html").is_file()
+        assert not (out / "测试群_48025936916@chatroom" / "消息.csv").exists()
+
+        _, res2 = _run_bundle(sc, msgs, tmp_path / "pkg-nohtml",
+                              work_dir=tmp_path / "work",
+                              resolver_cls=fake_resolver_cls(),
+                              options={"artifacts": {"html": False}})
+        out2 = Path(res2["path"])
+        assert not (out2 / "索引.html").exists()
+        assert (out2 / "测试群_48025936916@chatroom" / "消息.csv").is_file()
+
+
+def test_export_bundle_incremental_mode_and_new_messages() -> None:
+    """增量（export_state）：无 state → mode=full；同目录二跑且会话有新消息 →
+    mode=incremental、new_messages=本次条数（docs/02 §1.2 result 扩展）。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        msgs = [FakeRaw("text", text="第一条", local_id=1),
+                FakeRaw("text", text="第二条", local_id=2)]
+        pkg = tmp_path / "pkg-inc"
+        with ExitStack() as stack:
+            run_store_load(sc, msgs, options={"resolve_media": True},
+                           work_dir=tmp_path / "work",
+                           resolver_cls=fake_resolver_cls(), stack=stack)
+            first = sc.handle("export", {"format": "bundle", "out_path": str(pkg),
+                                         "options": {"incremental": True}})
+            assert first["mode"] == "full", first
+            assert first["new_messages"] == 2, first
+            # 会话计数增长 → 增量跳过判定失效，重新导出该会话
+            sc._store_ctx["chats"][0].message_count = 99
+            second = sc.handle("export", {"format": "bundle", "out_path": str(pkg),
+                                          "options": {"incremental": True}})
+        assert second["mode"] == "incremental", second
+        assert second["new_messages"] == 2, second
+        assert second["count"] == 2, second
+
+
+def test_export_bundle_incremental_cross_account_rejected() -> None:
+    """跨账号混写：同目录已有别的账号 state → INTERNAL（文案原样，docs/02 §1.2）。"""
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        msgs = [FakeRaw("text", text="同账号", local_id=1)]
+        pkg = tmp_path / "pkg-cross"
+        with ExitStack() as stack:
+            run_store_load(sc, msgs, options={"resolve_media": True},
+                           work_dir=tmp_path / "work",
+                           resolver_cls=fake_resolver_cls(), stack=stack)
+            sc.handle("export", {"format": "bundle", "out_path": str(pkg)})
+            sc._store_ctx["account"].wxid = "wxid_other"
+            try:
+                sc.handle("export", {"format": "bundle", "out_path": str(pkg),
+                                     "options": {"incremental": True}})
+                raise AssertionError("跨账号混写应抛 INTERNAL")
+            except mapping.SidecarError as exc:
+                assert exc.code == "INTERNAL" and "已被账号" in exc.message, \
+                    exc.message
 
 
 # ---------------------------------------------------------------- scan_accounts 数据目录（docs/07 #13）

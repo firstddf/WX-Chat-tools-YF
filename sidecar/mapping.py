@@ -148,6 +148,9 @@ def bundle_result(path: Path | str, report: Any) -> dict[str, Any]:
 
     path=数据包根目录；count=导出报告 messages；bytes=目录总字节数（遍历求和，
     只 stat 文件——数据包可达数 GB，但文件数在数千量级，耗时可忽略）。
+    ``mode``/``new_messages`` 为 2026-11-10 #14 增键（v1 内兼容）：mode 取
+    ``ExportReport.mode``（full|incremental，exporter 按「有无 state」判定），
+    new_messages=本次报告新增条数（前端完成提示按 mode 分文案）。
     """
     root = Path(path)
     total = 0
@@ -161,6 +164,8 @@ def bundle_result(path: Path | str, report: Any) -> dict[str, Any]:
         "path": str(root),
         "count": int(getattr(report, "messages", 0) or 0),
         "bytes": total,
+        "mode": str(getattr(report, "mode", "full") or "full"),
+        "new_messages": int(getattr(report, "new_messages", 0) or 0),
     }
 
 
