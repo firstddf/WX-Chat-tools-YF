@@ -166,7 +166,7 @@ PyInstaller 6 onedir 的 exe 依赖同级 `_internal/`（bootloader 按 exe 自�
 - 产物独立冒烟（`scripts/sidecar-product-smoke.py --load`）：ping `protocol_version=1`、
   scan_accounts **4 真账号**、`load_source` 真解密 **1 万+ 条 / 50+ 会话**、stop 干净退出 0。
 - 安装版冒烟（CDP 9223，`scripts/install-smoke.mjs`）**7/7**：`app_info.sidecar.state=ready`
-  （= 无降级横幅）、协议 1=1、账号栏 4 账号（「发现 4 个账号 · 已选账号：wxid_xxxxxxxx_3333」）、
+  （= 无降级横幅）、协议 1=1、账号栏 4 账号（「发现 4 个账号 · 已选账号：wxid_xxxxxxxx…」）、
   点加载 **「共 3 万+ 条消息 · 200+ 个会话 · 约 3 个月 · 匹配 3 万+ 条」29.6s**、console 0 错。
 - 图片/asset scope（`scripts/shell-media-check.mjs --port 9223`）**9/10**：加载 3 万+ 条
   **45.8s**（<120s 懒解码阈值）、缩略图真实解码（naturalWidth>0、src 指向

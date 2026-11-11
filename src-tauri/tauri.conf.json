@@ -25,8 +25,6 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
-          "<源机工作区>/wxchart-tauri/sidecar/.cache/decoded/**",
-          "<本机工作区>/wxchart-yf/wxchart-tauri/sidecar/.cache/decoded/**",
           "$APPLOCALDATA/media/**"
         ]
       }

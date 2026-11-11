@@ -3,13 +3,19 @@
 // 两个标签页都可见；启动扫描与选账号都在 store（store.init → scanAccounts），
 // 这里只负责展示交互，不直接碰 IPC。
 // #13 数据目录：「选择数据目录 / 恢复自动」→ store.setDataRoot（写 settings 并重扫）。
-import { computed, inject } from 'vue';
+// #18 帮助/关于：内置离线弹窗（docs/07 #18），按钮与弹窗状态归本组件。
+import { computed, inject, ref } from 'vue';
 import { pickDir } from '../ipc/dialog';
 import { STORE_KEY } from '../state/store';
 import type { Account } from '../ipc/types';
+import AboutModal from './AboutModal.vue';
+import HelpModal from './HelpModal.vue';
 
 const store = inject(STORE_KEY)!;
 const { data } = store;
+
+const showAbout = ref(false);
+const showHelp = ref(false);
 
 /** Tk 下拉显示 wxid；昵称非空且不同于 wxid 时显示「昵称 (wxid)」 */
 function labelOf(a: Account): string {
@@ -100,5 +106,16 @@ async function autoDataRoot(): Promise<void> {
     <span class="account-status" :class="{ warn: statusWarn }" data-testid="account_status">
       {{ statusText }}
     </span>
+    <span class="f-sep"></span>
+    <button type="button" class="f-btn" data-testid="btn_help" @click="showHelp = true">
+      帮助
+    </button>
+    <button type="button" class="f-btn" data-testid="btn_about" @click="showAbout = true">
+      关于
+    </button>
+
+    <!-- 内置离线弹窗（docs/07 #18）：Esc / 点遮罩 / 关闭按钮均可关 -->
+    <HelpModal v-if="showHelp" @close="showHelp = false" />
+    <AboutModal v-if="showAbout" @close="showAbout = false" />
   </div>
 </template>

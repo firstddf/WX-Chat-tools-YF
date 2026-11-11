@@ -4,8 +4,8 @@
 //! - 启动命令：`WXCHART_SIDECAR_CMD`（按空白切分 argv）优先 → **release 找随包 sidecar
 //!   exe**（`current_exe()` 同目录；NSIS 安装后为 `$INSTDIR\wxchart-data.exe`，查证见
 //!   docs/03 §4）→ dev 默认 `python <manifest>/../sidecar/launcher.py`；
-//! - release 注入 `WXCHART_SIDECAR_WORK_DIR`（每用户目录，见 `Inner::work_dir`），
-//!   dev 保持 launcher 默认 `sidecar/.cache`；
+//! - 注入 `WXCHART_SIDECAR_WORK_DIR`（每用户目录 `%LOCALAPPDATA%\com.wxchart.app\media`，
+//!   **dev/release 统一**，见 `Inner::work_dir`；与 tauri.conf 的 asset scope 同指该目录）；
 //! - NDJSON 读线程：按 `id` 匹配挂起请求（oneshot）；无 `id` 的 `progress`
 //!   帧立即转发为通道②事件 `data://progress`；
 //! - 启动 5s 内 `ping` → 校验 `protocol_version == 1` → `ready`（不一致 `mismatch`）；
@@ -108,8 +108,8 @@ struct Inner {
     app_name: String,
     app_version: String,
     start_cmd: Vec<String>,
-    /// release 的解码缓存目录（Some 时 spawn 注入 `WXCHART_SIDECAR_WORK_DIR`；
-    /// dev 为 None → launcher 默认 `sidecar/.cache`，见 docs/03 §3/§4）
+    /// 解码缓存目录（Some 时 spawn 注入 `WXCHART_SIDECAR_WORK_DIR`；dev/release 统一用
+    /// 每用户目录，与 tauri.conf asset scope 的 `$APPLOCALDATA/media/**` 同指，见 docs/03 §3/§4）
     work_dir: Option<PathBuf>,
 
     proc: StdMutex<Option<Proc>>,
@@ -383,7 +383,7 @@ impl SidecarManager {
         let pkg_name = app.package_info().name.clone();
         let pkg_version = app.package_info().version.to_string();
         let start_cmd = resolve_start_cmd();
-        let work_dir = release_work_dir(&app);
+        let work_dir = media_work_dir(&app);
 
         let inner = Arc::new(Inner {
             app: app.clone(),
@@ -704,15 +704,14 @@ fn find_bundled_sidecar() -> Option<PathBuf> {
         .find(|p| p.is_file() && p.with_file_name("_internal").is_dir())
 }
 
-/// release 的 sidecar 解码缓存目录：`$APPLOCALDATA/media`
+/// sidecar 解码缓存目录：`$APPLOCALDATA/media`
 /// （Windows = `%LOCALAPPDATA%\com.wxchart.app\media`，与 tauri.conf.json assetProtocol.scope
 /// 的 `$APPLOCALDATA/media/**` 指向同一路径；tauri path mod.rs 的 `$APPLOCALDATA` 解析）。
-/// 安装目录可能只读/被清理，不能沿用 launcher 的 `_HERE/.cache`；
-/// dev 返回 None → launcher 默认 `sidecar/.cache`（既有行为不变）。
-fn release_work_dir(app: &AppHandle) -> Option<PathBuf> {
-    if cfg!(debug_assertions) {
-        return None;
-    }
+/// 安装目录可能只读/被清理，不能沿用 launcher 的 `_HERE/.cache`。
+/// **dev/release 统一（2026-11-11 发布前整改）**：dev 不再回落 `sidecar/.cache`，于是
+/// asset scope 只需 `$APPLOCALDATA/media/**` 一条可移植条目——原先写死在 tauri.conf 里的
+/// 两条源机绝对路径（换机器即缩略图 403、且暴露本机目录结构）随之删除。
+fn media_work_dir(app: &AppHandle) -> Option<PathBuf> {
     use tauri::Manager;
     let dir = app.path().app_local_data_dir().ok()?.join("media");
     let _ = fs::create_dir_all(&dir);

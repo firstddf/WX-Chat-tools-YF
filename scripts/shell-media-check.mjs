@@ -12,7 +12,7 @@ const arg = (name, def) => {
   return i >= 0 && process.argv[i + 1] ? process.argv[i + 1] : def;
 };
 const port = Number(arg('--port', 9222));
-const accountHint = arg('--account', 'fga6u7');
+const accountHint = arg('--account', 'xxxxxxxx');
 const loadTimeout = Number(arg('--timeout', 300000)); // 懒解码后加载不再含全量解码，300s 兜底足够
 const doClick = !process.argv.includes('--no-click');
 
@@ -52,7 +52,7 @@ const checked = await page.isChecked('[data-testid="var_resolve_media"]').catch(
 if (!checked) await page.check('[data-testid="var_resolve_media"]');
 step('已勾选「解析附件路径」', await page.isChecked('[data-testid="var_resolve_media"]'), '');
 
-// 选带图片的账号（默认大账号 fga6u7）
+// 选账号（默认取列表第一个；源码不写真实账号，真机请用 --account <wxid子串> 指定）
 const opts = await page.$$eval('[data-testid="cmb_account"] option', (els) => els.map((e) => e.value));
 const account = opts.find((v) => v.includes(accountHint)) || opts[0];
 await page.selectOption('[data-testid="cmb_account"]', account);

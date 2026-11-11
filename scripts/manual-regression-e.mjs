@@ -10,8 +10,10 @@
 //      计划事件序列 / 消息正文全量 / 固定种子抽样 20 条（内容·时间·分组）
 //   E-7（Excel COM 打开 CSV）不在此脚本，分步执行见 docs/05 #11 章。
 // 用法：node scripts/manual-regression-e.mjs [--port 9223]
-//       [--tool-src ../wxchart-tool/src] [--root D:\微信数据\xwechat_files]
-//       [--account wxid_xxxxxxxx_1111] [--tk-dump <已有json> 跳过 python]
+//       [--tool-src ../wxchart-tool/src] [--root <微信数据根>]
+//       [--account <wxid>] [--tk-dump <已有json> 跳过 python]
+//       （`--root/--account` 的**默认值是脱敏占位符**，源码不写真实账号与本机路径；
+//         真机运行必须显式传参，例如 --root D:\微信数据\xwechat_files --account wxid_xxx_xxxx）
 // 约定：只断开 CDP、不 browser.close()（同 install-smoke.mjs）。
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';

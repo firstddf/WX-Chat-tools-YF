@@ -21,3 +21,8 @@ src-tauri/logs/
 # 本地安装/调试残留
 *.WebView2/
 .DS_Store
+
+# 本地运行/探针残留（2026-11-11 发布前整改：不得入库）
+run_out.txt
+run_err.txt
+canary-root.txt

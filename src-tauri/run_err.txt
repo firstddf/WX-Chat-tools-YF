@@ -1,4 +1,0 @@
-
-thread 'main' (11596) panicked at <用户名>\.cargo\registry\src\rsproxy.cn-e3de039b2554c837\tauri-2.12.5\src\app.rs:1444:11:
-Failed to setup app: runtime error: failed to create webview: WebView2 error: WindowsError(Error { code: HRESULT(0x8000FFFF), message: "灾难性故障" })
-note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

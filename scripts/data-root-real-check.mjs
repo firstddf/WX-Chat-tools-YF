@@ -76,10 +76,15 @@ try {
     const opts = await page.$$eval('[data-testid="cmb_account"] option', (els) =>
       els.map((e) => e.value).filter(Boolean));
     step('手动设置后扫到真实账号', opts.length >= 2, `${opts.join(' / ')} · ${s0}`);
+    // 期望值取自 get_settings（源码不写死本机路径——脱敏整改 2026-11-11）
+    const settings = await page
+      .evaluate(() => window.__TAURI_INTERNALS__.invoke('get_settings'))
+      .catch(() => null);
+    const expectRoot = settings?.data_root || '';
     step(
-      '状态行回显数据目录',
-      s0.includes('数据目录：D:\\微信数据\\xwechat_files'),
-      s0,
+      '状态行回显数据目录（== settings.data_root）',
+      Boolean(expectRoot) && s0.includes(`数据目录：${expectRoot}`),
+      `${s0} · data_root=${expectRoot}`,
     );
 
     // UI 加载（load_source root 注入口径——扫到还要能加载）。

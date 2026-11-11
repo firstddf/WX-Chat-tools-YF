@@ -4,8 +4,9 @@
 // - 未解析 / 本机缺失 / 解码或加载失败 → 「[图片] 名」占位（文案与 Tk 完全一致）；
 // - 单击缩略图（或解码失败但仍有路径的占位）→ ipc.openPath(media.path) 打开原文件；
 // - src 走 Tauri asset 协议：fileSrc 用 convertFileSrc 把绝对路径转成 WebView 可加载的 URL。
-//   tauri.conf.json `app.security.assetProtocol` 只放行 sidecar 解码缓存
-//   （sidecar/.cache/decoded/**），**不放行微信原始目录**；协议本身由 Cargo feature
+//   tauri.conf.json `app.security.assetProtocol` 只放行每用户解码缓存
+//   （`$APPLOCALDATA/media/**`，dev/release 统一，见 sidecar.rs `media_work_dir`），
+//   **不放行微信原始目录**；协议本身由 Cargo feature
 //   `protocol-asset` 启用。浏览器 / MockIpc 没有 __TAURI_INTERNALS__，fileSrc 退回原 path。
 // - 虚拟滚动会把 <img> 反复销毁重建：首次加载后异步生成 ≤220px 的 dataURL 按 path 缓存
 //   （对应 Tk `_photo_cache` / PHOTO_CACHE_SIZE），滚回来直接命中缓存、不再解码原图；
