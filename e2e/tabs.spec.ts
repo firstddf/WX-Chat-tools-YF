@@ -475,9 +475,12 @@ test('导出设置 #14 面板参数透传：会话子集/时间范围/include/ar
   await page.getByTestId('tab_manage').click();
   const manage = page.getByTestId('page_manage');
 
-  // 面板默认收起；展开 → 会话默认全选（缺省语义）+ 树行出现勾选框
+  // 面板**默认展开**（2026-11-11 反馈：对齐 Tk 常驻卡片）；收起/再展开仍可用，
+  // 展开态会话默认全选（缺省语义）+ 树行出现勾选框
+  await expect(manage.getByTestId('export_settings')).toBeVisible();
+  await manage.getByTestId('btn_export_settings').click(); // 收起
   await expect(manage.getByTestId('export_settings')).toHaveCount(0);
-  await manage.getByTestId('btn_export_settings').click();
+  await manage.getByTestId('btn_export_settings').click(); // 重新展开
   await expect(manage.getByTestId('export_settings')).toBeVisible();
   await expect(manage.getByTestId('exp_chat_count')).toContainText(
     `已选 ${FIXTURE_CHATS.length}/${FIXTURE_CHATS.length}`,
@@ -494,6 +497,12 @@ test('导出设置 #14 面板参数透传：会话子集/时间范围/include/ar
   await manage.getByTestId('btn_export_start').click();
   await expect(manage.getByTestId('manage_notice')).toContainText('请至少选择一个会话');
   expect(await exportCalls(page)).toHaveLength(0);
+
+  // Ctrl+A = 全选会话（吞掉浏览器整页全选；App 在管理页转发给面板）
+  await page.keyboard.press('Control+A');
+  await expect(manage.getByTestId('exp_chat_count')).toContainText(
+    `已选 ${FIXTURE_CHATS.length}/${FIXTURE_CHATS.length}`,
+  );
 
   // 全选 → 反选往返（同 Tk 全选/清空/反选三按钮）
   await manage.getByTestId('btn_exp_all').click();
@@ -556,7 +565,7 @@ test('导出设置 #14 增量完成文案：同目录二跑 → 「增量导出�
   await load(page);
   await page.getByTestId('tab_manage').click();
   const manage = page.getByTestId('page_manage');
-  await manage.getByTestId('btn_export_settings').click();
+  await expect(manage.getByTestId('export_settings')).toBeVisible(); // 默认展开（2026-11-11）
   await manage.getByTestId('btn_exp_browse').click();
 
   // 首跑：目录无 state → mode=full → 现行文案

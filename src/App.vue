@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // 应用外壳：账号栏（两个标签页共用）+ 标签页（数据筛选 / 聊天数据管理）+ sidecar 状态横幅 + store 装配。
-import { computed, provide, ref } from 'vue';
+import { computed, onMounted, onUnmounted, provide, ref } from 'vue';
 import { useIpc } from './ipc/context';
 import { createStore, STORE_KEY } from './state/store';
 import AccountBar from './components/AccountBar.vue';
@@ -43,6 +43,23 @@ function onOpenLocal(): void {
   tab.value = 'manage';
   void chatListRef.value?.openLocal();
 }
+
+/**
+ * 管理页 Ctrl/Cmd+A = 全选导出会话（docs/07 #14 追加，2026-11-11 用户反馈）：
+ * 吞掉浏览器「整页全选」默认行为（网页版会把工具栏/面板整片框蓝，Tk 是 Canvas 无此现象）。
+ * 输入框内不劫持（照常全选框内文字）；面板收起时由 ChatList 返回未消费 → 默认行为
+ * （配合骨架 user-select:none，只会选中消息正文，不再满屏蓝）。
+ */
+function onKeydown(e: KeyboardEvent): void {
+  if (tab.value !== 'manage') return;
+  if (e.key.toLowerCase() !== 'a' || !(e.ctrlKey || e.metaKey)) return;
+  const t = e.target as HTMLElement | null;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (chatListRef.value?.handleCtrlA()) e.preventDefault();
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown));
+onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 </script>
 
 <template>

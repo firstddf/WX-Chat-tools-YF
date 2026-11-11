@@ -362,6 +362,35 @@ body {
   cursor: pointer;
 }
 
+/* ---- 文字选择边界（docs/07 #14 追加，2026-11-11 用户反馈）----
+   网页版默认可选中界面文字：Ctrl+A / 拖拽会把工具栏、设置面板、会话树整片框蓝
+   （Tk 是 Canvas 自绘，无此现象）。界面骨架一律不参与选择；
+   **消息正文与输入框保持可选中**——A1 #16 管理页浏览拖选复制、E-5 附件文件名
+   拖选、输入框内 Ctrl+A 选文字等用例/习惯依赖它们。 */
+.accountbar,
+.tabbar,
+.banner,
+.f-panel,
+.f-row,
+.f-toolbar,
+.f-btn,
+.f-chip,
+.f-label,
+.f-count,
+.f-tilde,
+.f-sep,
+.statusbar,
+.source-card,
+.chat-tree,
+.boot-skeleton {
+  user-select: none;
+}
+
+input,
+textarea {
+  user-select: text;
+}
+
 .browse-pane {
   flex: 1;
   min-width: 0;

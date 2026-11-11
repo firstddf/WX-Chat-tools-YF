@@ -46,7 +46,8 @@ const EXP_QUICK: Array<{ id: string; label: string }> = [
   { id: 'month', label: '本月' },
 ];
 
-const settingsOpen = ref(false); // 面板展开（拍板①：管理页内嵌，不新开页签）
+// 默认展开（2026-11-11 用户反馈：对齐 Tk 导出页常驻卡片，不用先点「导出设置」）
+const settingsOpen = ref(true); // 面板展开（拍板①：管理页内嵌，不新开页签）
 const expChats = ref<string[]>([]); // 勾选的会话（chat_id == chat.username）
 const expFrom = ref('');
 const expTo = ref('');
@@ -157,8 +158,17 @@ watch(
   () => data.chats,
   () => {
     if (settingsOpen.value) expChats.value = data.chats.map((c) => c.chat_id);
+    if (!expDir.value) expDir.value = lastDir.value; // 输出目录预填最近目录（#6；不覆盖用户已选）
   },
 );
+
+/** Ctrl+A（App 在管理页转发）：面板展开时 = 全选会话。返回是否消费该键——
+ *  收起时返回 false，让浏览器默认只在消息正文里选字（骨架已 user-select:none）。 */
+function handleCtrlA(): boolean {
+  if (!settingsOpen.value) return false;
+  expSelectAll();
+  return true;
+}
 
 function toggleChat(id: string): void {
   expChats.value = expChats.value.includes(id)
@@ -364,8 +374,8 @@ function toFilter(): void {
   if (selectedId.value) emit('to-filter', selectedId.value);
 }
 
-// App 经 ref 触发：状态行「打开本地数据」出口（docs/07 Phase 2 #7）
-defineExpose({ openLocal });
+// App 经 ref 触发：状态行「打开本地数据」出口（docs/07 Phase 2 #7）+ 管理页 Ctrl+A（#14）
+defineExpose({ openLocal, handleCtrlA });
 </script>
 
 <template>
