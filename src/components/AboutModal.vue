@@ -50,6 +50,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
           <span class="f-label">构建</span>
           <span data-testid="about_build">{{ build.builtAt }} · {{ build.commit }}</span>
         </div>
+        <div class="about-row">
+          <span class="f-label">作者</span>
+          <span data-testid="about_author">firstddf</span>
+        </div>
+        <div class="about-row">
+          <span class="f-label">仓库</span>
+          <span data-testid="about_repo">https://github.com/firstddf/WX-Chat-tools-YF</span>
+        </div>
 
         <div class="about-note" data-testid="about_privacy">
           隐私：微信数据<b>只读</b>访问，程序从不写入；消息与附件只在本机读取与导出，

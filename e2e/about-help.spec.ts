@@ -2,7 +2,7 @@
 // 关于字段全部来自现有 AppInfo 与构建期 `__BUILD_INFO__`（协议未改）；帮助内容随包分发。
 import { expect, test } from '@playwright/test';
 
-test('关于 #18 弹窗：版本 / 协议版本 / 构建信息 / 隐私 / 非商用许可 + Esc 关闭', async ({
+test('关于 #18 弹窗：版本 / 协议版本 / 构建信息 / 作者 / 仓库 / 隐私 / 非商用许可 + Esc 关闭', async ({
   page,
 }) => {
   await page.goto('/');
@@ -16,6 +16,11 @@ test('关于 #18 弹窗：版本 / 协议版本 / 构建信息 / 隐私 / 非商
   await expect(page.getByTestId('about_sidecar')).toHaveText(/ready|starting|failed|mismatch|restarted/);
   // 构建信息 = 构建时间 · git 提交号（vite define 注入）
   await expect(page.getByTestId('about_build')).toContainText('·');
+  // 作者 + 仓库地址（纯文本展示，不加 <a href>——零外链口径见 security.spec C）
+  await expect(page.getByTestId('about_author')).toHaveText('firstddf');
+  await expect(page.getByTestId('about_repo')).toHaveText(
+    'https://github.com/firstddf/WX-Chat-tools-YF',
+  );
   await expect(page.getByTestId('about_privacy')).toContainText('只读');
   await expect(page.getByTestId('about_privacy')).toContainText('不联网');
   await expect(page.getByTestId('about_license')).toContainText('PolyForm Noncommercial');
