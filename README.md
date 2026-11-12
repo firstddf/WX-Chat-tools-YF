@@ -1,87 +1,116 @@
-# wxchart-tauri · Phase 2A 立项（Tauri 原生版）
+# 微信聊天记录工具（wxchart-tauri）
 
-> 目标：把 wxchart-tool 的界面与运行时升级为**原生 exe（无 Python 运行时）**——
-> Tauri 2（Rust 壳）+ WebView2 前端，数据层先以 sidecar 复用现有 Python 实现，
-> 再按契约逐步迁移到 Rust，最终彻底去 Python。
+> 本机微信聊天记录的**本地查看与导出**工具：加载你自己的微信数据库 → 按会话/时间/类型筛选 →
+> 浏览气泡消息 → 导出 JSON / CSV / HTML 站点（含图片与附件）。
+> **纯本地运行：无网络通信、不上传任何数据、微信数据库只读访问。**
+> 版本 **0.1.0** · 平台 Windows 10/11 x64 · 协议版本见 [docs/02](docs/02-IPC协议.md)。
 
-## 与现有 Tk 版的关系
+## 功能
 
-| | `wxchart-tool`（Tk 版） | `wxchart-tauri`（本项目，Phase 2A） |
-|---|---|---|
-| 状态 | **单独保留**，继续可用、继续修 bug | **M-A2/M-A3 已收口，M-A4 打包主体完成**（2026-11-07）；**2026-11-09 四轮增量**：本地数据 Phase 1（bundle 导出/回读，真机 15/15）、`get_settings` 账号记忆（真机 6/6）、数据目录自动发现/手动设置（真机 7/7）、`doctor` 数据层自检（协议→sidecar→壳→管理页面板，真机三段 16/16）、本地数据 Phase 2（最近目录/密钥错误出口/信息卡）、启动骨架屏（R3 补完）、C 类换行向量 e2e 回归、UI 级导出全链路真机（原生对话框自动化 15/15）、图标全套 + 杀软白名单文档、干净虚机安装冒烟（本机准干净等价：全新安装→六场景冒烟→卸载全清，含装机图标/快捷方式验证）、出厂前手工回归 E（docs/04 §E 八条自动化等价执行，E-8 真双实现 1000+ 事件/1000+ 条/抽样 20 全一致）、**#14 导出设置页（2026-11-11：选择性 + 增量数据包——管理页内嵌面板、`options` 白名单接参、增量与三个子集包真机 18/18）**、**#17 导出独立页签（2026-11-11 下午：本地导出迁出管理页 → 独立「导出」页签照 Tk 三段布局，e2e 三条改指 + 真机 13/13）**；测试 **309 项全绿**（契约 36 + Tk 91 + Vitest 139 + Playwright 43）。**Backlog 全部收口**（余 M-A5 去 Python = 可选不排期），见 [docs/07](docs/07-施工计划清单.md) |
-| 界面 | tkinter + Canvas 自绘 | HTML/CSS/JS（WebView2 合成器渲染） |
-| 运行时 | 需要本机 Python | 单安装包，最终无 Python |
-| 数据层 | `src/wxchart` 同一份实现 | **直接复用**（sidecar 调用），后迁 Rust |
-| 关系 | 事实上的行为规格来源 | 按 `docs/04` 的 91 项验收清单对齐行为 |
+- **数据加载**：自动发现本机微信数据目录（也可手动设置），选择账号后加载会话与消息；
+  未登录微信 / 密钥不在内存时给出明确引导（KEY_NOT_FOUND / NO_ACCOUNT）。
+- **会话浏览**：左侧会话列表（搜索、全选/清空/反选），右侧气泡消息视图——
+  虚拟滚动（万级消息不卡）、日期分组、引用块单击跳转、图片缩略图懒解码。
+- **交互**（对齐 Tk 版手感）：鼠标拖选复制、跨气泡多选、右键菜单、日期控件、Ctrl+A。
+- **数据筛选页**：按时间范围与消息类型筛选，筛选结果驱动浏览与导出。
+- **导出**：独立「导出」页签——选择会话/时间/内容类型，导出 JSON、CSV、HTML 站点
+  （含 `media_index` / `date_index`、图片与附件副本），支持**增量数据包**（同目录二次导出只补新消息）。
+- **本地数据包**：导出数据包后可**脱离微信回读**（换机器、退出微信后继续浏览与再导出）。
+- **数据层自检（doctor）**：一键检查数据目录、账号、密钥、各数据库可读性与消息计数。
+- **设置记忆**：最近账号、数据目录、最近导出目录自动记住。
+- **关于 / 帮助**：账号栏内置「关于」（版本、协议版本、构建信息、隐私与许可）与
+  **离线帮助页**（快速上手、常见问题、导出说明）——应用内即可查，无需联网。
 
-两版**共享数据契约**（消息字段、JSON/CSV 导出格式、quote 结构），
-`wxchart-tool` 的 `tests/` 是行为规格的可执行来源，迁移期间不删除、不挪动。
+## 安装与首次运行
 
-## 环境前提（本机 2026-11-06 盘点 · M-A1 已落实）
+1. 运行 `微信聊天记录工具_0.1.0_x64-setup.exe`（静默安装：`setup.exe /S`）。
+   NSIS **currentUser 模式**——装到当前用户目录，**不需要管理员权限**；
+2. 启动后**先登录微信**（解密密钥存在于微信进程内存，本工具只读取、不修改）；
+3. 首次运行会自动发现微信数据目录；找不到时可在设置里手动指定；
+4. 选择账号 → 加载 → 在「数据筛选」页筛选、在「导出」页导出；
+   具体用法见应用内**帮助**（账号栏「帮助」按钮）。
 
-- ✅ Node.js + pnpm 已安装（`D:\nodejs\...`）
-- ✅ **Rust 工具链已装**（M-A1）：rustup stable-x86_64-pc-windows-msvc，cargo/rustc 1.99.1。
-  rustup 走 USTC 镜像（实测官方 CDN 仅 0.29 MB/s，镜像约 2 MB/s）：
-  - `RUSTUP_DIST_SERVER=https://mirrors.ustc.edu.cn/rust-static`
-  - `RUSTUP_UPDATE_ROOT=https://mirrors.ustc.edu.cn/rust-static/rustup`
-- ✅ **C++ 工具链：复用本机已有 VS 2026 Build Tools**（M-A1 方案决策，不另装 2022：
-  省 4–6 GB 下载/约 40 分钟）—— MSVC 14.50.35717（`cl.exe`/`link.exe`）+
-  Windows SDK 10.0.26100.0，rustc/Tauri 经 vswhere 自动检测。换机器时装
-  **VS Build Tools 2022 + C++ 工作负载**即可（MSVC 版本不敏感）
-- ✅ WebView2 运行时：Win10/11 自带（安装器会检测，缺失时引导下载 Evergreen 引导器）
-  - ⚠️ **本机开发注意（2026-11-07 结案）**：本工作区被 DSH 文件沙箱打了 Low 完整性标签，
-    cargo 产出的 exe 继承 Low IL，WebView2 会拒绝初始化（`failed to create webview` /
-    窗口挂起）。遇到就跑 `scripts\fix-dev-integrity.ps1`（把 `src-tauri\target` 树 IL 改回 Medium），
-    原因与证据见 [docs/05](docs/05-开发日志.md)
-- ✅ Python 3.10.11 + 依赖（pycryptodome/zstandard/Pillow）已就绪 —— sidecar 打包用
-- ✅ **依赖源全走国内镜像**（M-A2，2026-11-06 实测：npm 官方 0.36 vs 镜像 4.15 MB/s；
-  crates 0.04 vs rsproxy 0.15；Playwright 0.89 vs 1.9）：
-  - npm → npmmirror（工程级 `.npmrc`，只影响本项目）
-  - cargo → rsproxy（`src-tauri/.cargo/config.toml`，S5 脚手架时落盘）
-  - Playwright 浏览器 → `PLAYWRIGHT_DOWNLOAD_HOST=https://cdn.npmmirror.com/binaries/playwright`
+安装目录与运行期写入目录见下文「杀软白名单」一节。
 
-## 目录规划（代码动工后的计划结构）
+## 开发环境前提（仅开发/跑测试需要）
 
-```
-wxchart-tauri/
-├── README.md                  ← 本文件
-├── docs/
-│   ├── 01-总体架构与路线.md
-│   ├── 02-IPC协议.md          ← 前端 ↔ Tauri ↔ sidecar 三层协议
-│   ├── 03-数据层sidecar方案.md
-│   └── 04-测试迁移与验收清单.md ← 91 项测试的逐条去向
-├── src/                       ← Vue 3 + TS + Vite 前端
-│   ├── ipc/                   ← IPC 适配层（tauri 实现 / 浏览器 mock 双轨，测试用）
-│   ├── components/            ← 气泡列表、虚拟滚动、引用块、多选、筛选面板
-│   └── styles/                ← 由 exporter.py 的气泡 CSS 移植
-├── src-tauri/                 ← Rust 壳（窗口、命令路由、sidecar 生命周期）
-├── sidecar/                   ← Python 数据层启动器（复用 ../wxchart-tool/src/wxchart）
-│   └── tests/test_contract.py ← 通道③契约测试（M-A1，直跑风格：python 即可）
-├── scripts/
-│   ├── verify.ps1             ← 验收脚本：契约 14 + Tk 全量 91 + typecheck + Vitest + Playwright（打包前必跑）
-│   ├── acceptance-real.mjs    ← 真机验收：CDP 驱动真实壳（账号/加载/筛选/虚拟滚动/管理页）
-│   ├── shell-interaction-check.mjs ← 真机交互：真鼠标拖选/复制/右键菜单/多选
-│   └── fix-dev-integrity.ps1  ← 开发期修复：target 树完整性级别改回 Medium（WebView2 起不来时）
-└── tests/                     ← 前端测试（Vitest + Playwright），对照 docs/04
+- **Node.js 24+ + pnpm**（`.npmrc` 已配置 npmmirror 镜像）
+- **Rust stable（MSVC）+ VS Build Tools（含 C++ 工作负载）**——Tauri 壳编译
+- **Python 3.10** + `pip install -r ../wxchart-tool/requirements.txt pyinstaller`——sidecar 数据层与打包
+- **WebView2 运行时**：Win10/11 自带
+- Playwright 浏览器：`pnpm exec playwright install chromium`（镜像已配置）
+- 沙箱/低完整性环境下 WebView2 起不来时先跑 `scripts/fix-dev-integrity.ps1`
+  （详见 [docs/07 §0](docs/07-施工计划清单.md) 环境铁律）
+
+```powershell
+pnpm install                 # 前端依赖
+pnpm dev                     # 前端开发（vite 5173）
+pwsh scripts/build-sidecar.ps1   # 冻结 sidecar（打包前）
+pnpm tauri build             # 正式安装包（交付口径，不带调试端口）
 ```
 
-> 代码目录为计划结构；M-A1 已落地 `sidecar/` 与 `scripts/`，前端 `src/` 与
-> `src-tauri/` 仍待 M-A2 动工（动工顺序见路线图 M-A1）。
+## 测试口径
 
-## 路线图（详见 docs/01）
+一键门禁（打包前必跑，**全绿才打包**）：
 
-| 里程碑 | 内容 | 验收 |
+```powershell
+pwsh scripts/verify.ps1
+```
+
+**基线 311 项全绿** = sidecar 契约 **36** + Tk 行为规格 **91** + Vitest **139** + Playwright **45**
+（含 typecheck 0 错；口径演进见 [CHANGELOG](CHANGELOG.md) 与 [docs/04](docs/04-测试迁移与验收清单.md)）。
+
+- 契约与 Tk 基线：`sidecar/tests/test_contract.py` + `../wxchart-tool/tests/`（**只读行为规格来源**）；
+- 前端单测：`pnpm test`（Vitest，`tests/`）；端到端：`pnpm test:e2e`（Playwright，`e2e/`，
+  产物固定落 `test-results/e2e/`）；
+- 真机脚本：`scripts/*-real-check.mjs` / `install-smoke.mjs` 等，需本机装微信并登录；
+- 验收清单与逐条去向：[docs/04-测试迁移与验收清单.md](docs/04-测试迁移与验收清单.md)。
+
+## 与 Tk 版（wxchart-tool）的关系
+
+| | `wxchart-tool`（Tk 版） | 本项目（Tauri 原生版） |
 |---|---|---|
-| **M-A1 契约冻结** | 评审并冻结 `docs/02/03` 协议；装 Rust 工具链；sidecar 骨架（stdio NDJSON + `ping/scan_accounts/load_source/export/stop`；**无 `query` 方法**——筛选在前端，见 docs/01 D2） | 契约测试 `sidecar/tests/test_contract.py` 跑通 `ping/load_source/export` + 错误码映射；协议文档标注 version=1 |
-| **M-A2 可看**（✅ 2026-11-07 收口） | 前端壳：窗口、会话列表、**虚拟滚动消息列表**、筛选面板、气泡样式（移植 exporter CSS）、账号选择 | ✅ 真机验收：真实 WebView2 + 真实微信库（1 万+ / 3 万+ 条两个账号样本），虚拟滚动/筛选/全选/管理页 + 真鼠标拖选/复制/右键菜单全过；`verify.ps1` 191 项全绿 |
-| **M-A3 可用（对齐微信）**（✅ 已收口 2026-11-07） | 文字拖选复制、引用块跳转、多选（跨气泡拖选/右键/勾选框）、右键菜单、日期控件、图片缩略图 | 拖选/多选/右键菜单/日期控件/引用跳转+回跳/图片缩略图全部过（A1 #9 懒解码真机热冷双验 10/10）；目标 `docs/04` ≥90% |
-| **M-A4 可交付**（🚧 主体完成 2026-11-07） | 导出 JSON/CSV 打通、保存对话框、Tauri 打包（bundle 内含 sidecar） | ✅ NSIS 安装包产出（14.72MiB）+ 本机静默安装冒烟（握手/账号/加载/图片 scope/优雅退出）+ 冻结包导出链路实测（CSV 含解码路径）全过；**余**：干净虚机全链路、UI 级导出真机、杀软白名单 |
-| **M-A5 去 Python（可选）** | 热路径 Rust 化（解密/解析/筛选），sidecar 退场 | 同一契约测试对 Rust 实现全绿；包体内无 Python |
+| 界面 | tkinter + Canvas 自绘 | HTML/CSS/JS（WebView2） |
+| 运行时 | 需要本机 Python | 单安装包（数据层为内置冻结 sidecar） |
+| 数据层 | `src/wxchart` 同一份实现 | 直接复用（sidecar 调用），远期按 [docs/01](docs/01-总体架构与路线.md) 迁 Rust |
+| 角色 | **行为规格来源**（91 项测试） | 本仓库 = 主产品 |
 
-## 安装与杀软白名单（docs/07 #7，2026-11-10）
+两版共享数据契约（消息字段、JSON/CSV 导出格式、quote 结构）。
+**本仓库只含 Tauri 版**；Tk 版是独立的只读基线，不在本仓库内。
 
-**安装**：双击 `微信聊天记录工具_0.1.0_x64-setup.exe`（或静默 `setup.exe /S`）。
-NSIS **currentUser 模式**——装到当前用户、**不需要管理员**；默认安装目录：
+## 文档索引
+
+- [CHANGELOG.md](CHANGELOG.md) — 版本变更与已知限制
+- [docs/01-总体架构与路线.md](docs/01-总体架构与路线.md) — 架构总览、选型理由、决策、风险
+- [docs/02-IPC协议.md](docs/02-IPC协议.md) — 命令/事件/错误码/版本的完整规格
+- [docs/03-数据层sidecar方案.md](docs/03-数据层sidecar方案.md) — 进程模型、传输、打包、迁移
+- [docs/04-测试迁移与验收清单.md](docs/04-测试迁移与验收清单.md) — 91 项测试逐条去向与验收标准
+- [docs/05-开发日志.md](docs/05-开发日志.md) — 按里程碑的进度、决策与遗留
+- [docs/06-本地数据方案.md](docs/06-本地数据方案.md) — 本地数据包：导出与回读方案
+- [docs/07-施工计划清单.md](docs/07-施工计划清单.md) — Backlog：现状/实现路径/验收/预估
+
+## 已知限制
+
+- **语音消息只能看到气泡与文件，不能播放、不能转文字**：微信语音原文为 SILK_V3 格式，
+  WebView2 与本仓库均无解码器（Tk 版同样没有，属长期缺口，非本次回归）；转码/转写待排期。
+- **框选起点必须在气泡上**：行内头像/头部/行间隙不作为拖选起点——与 Tk 版 `_bubble_msg_at`
+  口径逐字一致（按设计，不是缺陷）。
+- **无检查更新、无网络请求**：版本升级需手动下载安装包。
+- 数据层当前为 **Python 冻结 sidecar**（PyInstaller onedir）；去 Python（M-A5）为可选远期项，未排期。
+- 打开导出的 HTML 站点/图片/语音时使用系统默认程序；语音 `.silk` 文件无关联程序时无法播放。
+
+## 许可与隐私
+
+- **License：[LICENSE](LICENSE) — PolyForm Noncommercial License 1.0.0（非商用）**
+  - `Required Notice: Copyright 2026 firstddf (https://github.com/firstddf/WX-Chat-tools-YF)`
+  - 即：可以学习、研究、个人非商业使用；**商业使用需另行授权**。
+- **隐私**：程序**不联网**、不上传数据；微信数据库**只读**访问；
+  所有个人数据（账号、消息、图片、导出包、`settings.json`）只落在你本机的用户目录，
+  **不在本仓库内**；仓库内的测试夹具全部为占位符（`wxid_xxxxxxxx_1111` 等）。
+
+## 安装与杀软白名单（docs/07 #7）
+
+**安装目录**（NSIS currentUser 模式，无需管理员）：
 
 ```text
 %LOCALAPPDATA%\微信聊天记录工具\
@@ -103,24 +132,13 @@ NSIS **currentUser 模式**——装到当前用户、**不需要管理员**；�
 
 - 程序目录**只读**（除卸载外不写入）；所有可写数据都在上面两个 `%LOCALAPPDATA%`/
   `%APPDATA%` 目录——**排除这两处即可消除全部写入告警**；
-- 微信数据目录（`D:\微信数据\xwechat_files` 等，用户自定义）**只读访问**，程序从不写入。
+- 微信数据目录（如 `D:\微信数据\xwechat_files`，用户自定义）**只读访问**，程序从不写入。
 
 **误报说明与提交指引**：
 
 - 本程序**无网络通信、无注入、无自启动**；sidecar 为 PyInstaller **onedir** 布局
   （非 onefile 单文件——R2 对策，已显著减小杀软启发式误报面）；
 - 若仍被误报：向杀软厂商提交**误报申诉**，附安装目录与 `wxchart-data.exe` 路径
-  （如 `C:\Program Files\…` 或 `%LOCALAPPDATA%\微信聊天记录工具\`），并说明其为
-  本地数据解密组件、行为=读本机数据库文件解密到本机缓存目录；
-- **代码签名**可根治 SmartScreen/杀软信誉问题，但需采购代码签名证书（**单列决策**，
-  未纳入本项目排期）。
-
-## 文档索引
-
-- [docs/01-总体架构与路线.md](docs/01-总体架构与路线.md) — 架构总览、选型理由、决策、风险
-- [docs/02-IPC协议.md](docs/02-IPC协议.md) — 命令/事件/错误码/版本的完整规格
-- [docs/03-数据层sidecar方案.md](docs/03-数据层sidecar方案.md) — 进程模型、传输、打包、迁移
-- [docs/04-测试迁移与验收清单.md](docs/04-测试迁移与验收清单.md) — 91 项测试逐条去向与验收标准
-- [docs/05-开发日志.md](docs/05-开发日志.md) — Phase 2A 按里程碑的进度、决策与遗留（M-A2 起）
-- [docs/06-本地数据方案.md](docs/06-本地数据方案.md) — 本地数据（脱离微信可用）清单方案：数据包导出 + 导出目录回读
-- [docs/07-施工计划清单.md](docs/07-施工计划清单.md) — **待实现功能 Backlog**：现状/实现路径/验收/预估，下次开工按此施工
+  （如 `%LOCALAPPDATA%\微信聊天记录工具\`），并说明其为本地数据解密组件、
+  行为=读本机数据库文件解密到本机缓存目录；
+- **代码签名**可根治 SmartScreen/杀软信誉问题，但需采购代码签名证书（单列决策，未纳入排期）。

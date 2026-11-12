@@ -186,7 +186,7 @@ PyInstaller 6 onedir 的 exe 依赖同级 `_internal/`（bootloader 按 exe 自�
   | dev exe `target/debug`（fix-dev-integrity 打过 Medium 标签） | Medium | shell `$env:` | ✅ **9222 监听**，浏览器命令行含 `--remote-debugging-port=9222` |
   | release `target/release` ×2 | Medium | shell `$env:` | ✅ 9224 / 9228 监听 |
   | 安装版 exe（NSIS 装出的文件**无标签**→ 从提权 shell 启动 = High）×3 | High | PSI / shell / cmd 三种注入 | ❌ 端口不监听、浏览器主进程命令行无该参数 |
-  | 同一份安装版文件复制到 `<测试目录>`、`E:\<测试目录>2` | High | shell `$env:` | ❌ ×2（排除路径/盘符因素） |
+  | 同一份安装版文件复制到工作区外的两个测试目录（路径已隐去） | High | shell `$env:` | ❌ ×2（排除路径/盘符因素） |
   | **同一安装版 exe `icacls` 打 Medium 标签后重启（因果实验）** | Medium | shell `$env:` | ✅ **9232 监听** |
 
   PEB 读取实证：High 失败样本的进程环境里**确实存在**

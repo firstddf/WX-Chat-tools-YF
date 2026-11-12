@@ -6,7 +6,7 @@
 # Low IL 的宿主进程调用 WebView2 会在 CreateCoreWebView2Environment 阶段失败：
 #   - 全新 profile：`WebView2 error: WindowsError(0x8000FFFF 灾难性故障)`；
 #   - 已有 profile：`0x800700AA 请求的资源在使用中`；或窗口起来但 setup 永不执行。
-# 同一个 exe 复制到工作区外（<测试目录>、<测试目录>）即可正常运行 → 排除运行时/GPU/权限因素。
+# 同一个 exe 复制到工作区外（两个测试目录，路径已隐去）即可正常运行 → 排除运行时/GPU/权限因素。
 # 修复只需把 target 树的 IL 显式设为 Medium（Windows 默认级别），不需要改 DACL。
 #
 # 何时需要跑：`pnpm tauri dev` / 直接运行 target\debug\wxchart-tauri.exe 出现

@@ -12,8 +12,9 @@
   5) stop          -> 正常退出（exit 0）
 
 注意：load_source/export 会穿插无 id 的 progress 通知帧，call() 必须按 id 配对读帧。
-用法: python scripts/sidecar-product-smoke.py <exe路径> [--load] [--export]
-     （可先设 WXCHART_SIDECAR_WORK_DIR 指定解码缓存，验证环境变量钩子）
+用法: python scripts/sidecar-product-smoke.py <exe路径> [--load] [--export] [--accounts N]
+     （可先设 WXCHART_SIDECAR_WORK_DIR 指定解码缓存，验证环境变量钩子；
+       数据根在自定义位置时设 WXCHART_XWECHAT_ROOT，账号目录数随本机变化用 --accounts 传参）
 """
 import json
 import subprocess
@@ -69,6 +70,7 @@ def main() -> int:
             print(f"  [notify] {safe[:160]}")
 
     failed = []
+    n_accounts = -1
     try:
         ping = call(1, "ping")
         pv = (ping.get("result") or {}).get("protocol_version")
@@ -79,9 +81,17 @@ def main() -> int:
         acc = call(2, "scan_accounts")
         accounts = (acc.get("result") or {}).get("accounts") or []
         ids = [a.get("wxid") or a.get("username") for a in accounts]
+        n_accounts = len(accounts)
         print(f"scan_accounts -> {len(accounts)} accounts: {ids}")
-        if len(accounts) != 4:
-            failed.append(f"scan_accounts count={len(accounts)} != 4")
+        # 账号目录数随本机数据根变化（同 install-smoke 的 --accounts 口径），默认 4
+        expect_acc = 4
+        if "--accounts" in sys.argv:
+            try:
+                expect_acc = int(sys.argv[sys.argv.index("--accounts") + 1])
+            except (IndexError, ValueError):
+                expect_acc = 4
+        if len(accounts) != expect_acc:
+            failed.append(f"scan_accounts count={len(accounts)} != {expect_acc}")
 
         msgs: list = []
         if "--load" in sys.argv and accounts:
@@ -178,7 +188,7 @@ def main() -> int:
         for f in failed:
             print(f"  - {f}")
         return 1
-    print("SMOKE PASS (ping protocol_version=1, scan_accounts=4, stop clean)")
+    print(f"SMOKE PASS (ping protocol_version=1, scan_accounts={n_accounts}, stop clean)")
     return 0
 
 
