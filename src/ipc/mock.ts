@@ -3,9 +3,9 @@
 import { deriveChats, deriveStats } from '../logic/derive';
 import { makeAccounts, makeMessages } from './fixtures';
 import type {
-  Account, AppInfo, AppSettings, DoctorResult, ErrorInjection, ExportParams, ExportResult, Ipc,
-  LoadParams, LoadResult, Media, Message, ProgressParams, ProtocolError, ResolveMediaResult,
-  ScanAccountsResult, SidecarStatus,
+  Account, AppInfo, AppSettings, DoctorResult, ErrorInjection, ExportParams, ExportResult,
+  ExtractTrackingParams, ExtractTrackingResult, Ipc, LoadParams, LoadResult, Media, Message,
+  ProgressParams, ProtocolError, ResolveMediaResult, ScanAccountsResult, SidecarStatus,
 } from './types';
 import { PROTOCOL_VERSION } from './types';
 
@@ -72,6 +72,8 @@ export class MockIpc implements Ipc {
   private statusCbs = new Set<(s: SidecarStatus) => void>();
   /** 已导出过的数据包目录（export_state 等价物：同目录二跑才可能 incremental） */
   private bundleDirs = new Set<string>();
+  /** 是否已存 DPAPI Key（extractTracking 带 api_key 跑过后为 true；preflight 回显用） */
+  trackingKeyStored = false;
 
   constructor(opts: MockIpcOptions = {}) {
     this.errors = { ...opts.errors };
@@ -113,7 +115,7 @@ export class MockIpc implements Ipc {
     this.fail('appInfo');
     return {
       name: '微信聊天记录工具',
-      version: '0.1.0',
+      version: '0.2.0',
       protocol_version: PROTOCOL_VERSION,
       sidecar: { state: 'ready', protocol_version: PROTOCOL_VERSION },
     };
@@ -219,6 +221,51 @@ export class MockIpc implements Ipc {
         { name: 'contact/contact.db', ok: true },
       ],
       messages: this.messageCount,
+    };
+  }
+
+  /**
+   * docs/02 §1.2 `extract_tracking`（#19）：合成计数/结果；进 `calls` 供断言。
+   * preflight：rows=11796、候选 42、复用 7——network=false → send_rows=0；
+   * network=true+audit → 候选 42 + 回检抽样 300 → 342（UI 披露行数断言用）。
+   * run：回显合成统计并发一条 progress（phase=extract_tracking）。
+   */
+  async extractTracking(params: ExtractTrackingParams): Promise<ExtractTrackingResult> {
+    this.calls.push({ method: 'extractTracking', params });
+    await delay(this.latencyMs);
+    this.fail('extractTracking');
+    if (params.mode === 'preflight') {
+      const network = params.network ?? false;
+      const audit = params.audit ?? true;
+      const candidates = 42;
+      const sendRows = network ? candidates + (audit ? 300 : 0) : 0;
+      return {
+        mode: 'preflight',
+        rows: 11796,
+        candidates,
+        reuse_rows: 7,
+        batches: network ? 1 : 0,
+        send_rows: sendRows,
+        key_stored: this.trackingKeyStored,
+      };
+    }
+    const network = params.network ?? false;
+    if (params.api_key) this.trackingKeyStored = true; // 保存语义（sidecar DPAPI 落盘等价）
+    this.emitProgress({
+      phase: 'extract_tracking', done: 1, total: 1, message: '导出完成',
+    });
+    return {
+      mode: 'run',
+      path: params.out_path ?? 'C:/mock/输出_提取快递单号.csv',
+      rows: 11796,
+      out_rows: 11830,
+      with_numbers: 640,
+      numbers: 712,
+      reused_rows: 7,
+      sent_rows: network ? 342 : 0,
+      tokens: network ? 521000 : 0,
+      elapsed: 12.3,
+      network,
     };
   }
 

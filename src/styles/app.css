@@ -417,6 +417,42 @@ body {
   margin-top: 2px;
 }
 
+/* ---- 快递单号提取页（docs/07 #19）：输入卡 + 选项卡 + 动作条/日志（复用导出页样式） ---- */
+.tracking-page {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 联网披露（拍板③）：明示将发送行数与去向——警示底色，纯文本不加外链 */
+.trk-disclosure {
+  background: #fff8e6;
+  border: 1px solid #ffe58f;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #614700;
+}
+
+/* 纯本地提示（拍板①）：明示准确率有限 */
+.trk-local-hint {
+  background: #f6f8fa;
+  border: 1px solid #e1e4e8;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  line-height: 1.65;
+  color: #57606a;
+}
+
+.trk-net-label {
+  color: #bc4c00;
+  font-weight: 600;
+}
+
 /* ---- 关于 / 帮助弹窗（docs/07 #18，内置离线）----
    挂在账号栏下（position:fixed 覆盖视口，祖先无 transform）；
    弹窗正文显式 user-select:text——账号栏骨架是 none，正文要能选中复制（同 .msg-row 口径）。 */

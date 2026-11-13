@@ -2,7 +2,7 @@
 //! 命令名与参数名必须与 `src/ipc/tauri.ts` 逐字一致：
 //! `app_info` / `scan_accounts` / `load_data{kind,account,out_dir,options}` /
 //! `export_messages{format,scope,out_path,options}` / `resolve_media{indexes}` /
-//! `doctor{}` / `open_path{path}` / `reveal_path{path}`。
+//! `doctor{}` / `extract_tracking{mode,...}` / `open_path{path}` / `reveal_path{path}`。
 //! 全部返回 `Result<T, AppError>`，拒绝值即前端 ProtocolError `{code,message,detail?}`。
 
 use std::path::Path;
@@ -13,8 +13,8 @@ use tauri::{Manager, State};
 
 use crate::error::AppError;
 use crate::sidecar::{
-    SidecarManager, SidecarStatus, DEFAULT_TIMEOUT, DOCTOR_TIMEOUT, EXPORT_TIMEOUT,
-    LOAD_TIMEOUT, PROTOCOL_VERSION, RESOLVE_TIMEOUT,
+    SidecarManager, SidecarStatus, DEFAULT_TIMEOUT, DOCTOR_TIMEOUT, EXTRACT_TIMEOUT,
+    EXPORT_TIMEOUT, LOAD_TIMEOUT, PREFLIGHT_TIMEOUT, PROTOCOL_VERSION, RESOLVE_TIMEOUT,
 };
 
 /// `app_info` resolves（docs/02 §2）
@@ -203,6 +203,74 @@ pub async fn doctor(
         params["root"] = json!(data_root);
     }
     manager.call("doctor", params, DOCTOR_TIMEOUT).await
+}
+
+/// `extract_tracking` → 转发通道③（快递单号提取，docs/02 §1.2 2026-11-13 #19）。
+/// `mode=preflight|run`；**键 camelCase**（inPath/oldPath/outPath/apiKey，见 docs/02 §2 注）。
+/// 超时：preflight 60s（本地读 CSV+宽筛）/ run 7200s（联网长跑，progress 保活）。
+/// `apiKey` 仅在用户显式开启联网并填写时非空——sidecar 侧 DPAPI 加密落盘，不回传不入库。
+#[tauri::command]
+pub async fn extract_tracking(
+    mode: String,
+    in_path: String,
+    old_path: Option<String>,
+    out_path: Option<String>,
+    network: Option<bool>,
+    api_key: Option<String>,
+    audit: Option<bool>,
+    resume: Option<bool>,
+    force: Option<bool>,
+    manager: State<'_, SidecarManager>,
+) -> Result<Value, AppError> {
+    if mode != "preflight" && mode != "run" {
+        return Err(AppError::internal(format!(
+            "mode 取值非法: {mode:?}（应为 preflight|run）"
+        )));
+    }
+    if in_path.trim().is_empty() {
+        return Err(AppError::internal("extract_tracking 缺少 in_path"));
+    }
+    let mut params = json!({ "mode": mode, "in_path": in_path });
+    if let Some(o) = old_path.filter(|s| !s.is_empty()) {
+        params["old_path"] = json!(o);
+    }
+    let out_parent = out_path
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|p| Path::new(p).parent())
+        .map(|x| x.to_string_lossy().into_owned())
+        .filter(|s| !s.is_empty());
+    if let Some(o) = out_path.filter(|s| !s.is_empty()) {
+        params["out_path"] = json!(o);
+    }
+    if let Some(n) = network {
+        params["network"] = json!(n);
+    }
+    if let Some(k) = api_key.filter(|s| !s.is_empty()) {
+        params["api_key"] = json!(k);
+    }
+    if let Some(a) = audit {
+        params["audit"] = json!(a);
+    }
+    if let Some(r) = resume {
+        params["resume"] = json!(r);
+    }
+    if let Some(f) = force {
+        params["force"] = json!(f);
+    }
+    let timeout = if mode == "run" {
+        EXTRACT_TIMEOUT
+    } else {
+        PREFLIGHT_TIMEOUT
+    };
+    let result = manager.call("extract_tracking", params, timeout).await?;
+    // 成功后输出目录进 scope（「打开输出文件」用，同 export json/csv 口径）
+    if mode == "run" {
+        if let Some(parent) = out_parent {
+            manager.add_export_root(&parent);
+        }
+    }
+    Ok(result)
 }
 
 /// 打开路径（opener 插件）；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED`。

@@ -7,8 +7,9 @@ import {
   EVENT_PROGRESS, EVENT_SIDECAR_STATUS, PROTOCOL_VERSION,
 } from './types';
 import type {
-  AppInfo, AppSettings, DoctorResult, ExportParams, ExportResult, Ipc, LoadParams, LoadResult,
-  ProgressParams, ProtocolError, ResolveMediaResult, ScanAccountsResult, SidecarStatus,
+  AppInfo, AppSettings, DoctorResult, ExportParams, ExportResult, ExtractTrackingParams,
+  ExtractTrackingResult, Ipc, LoadParams, LoadResult, ProgressParams, ProtocolError,
+  ResolveMediaResult, ScanAccountsResult, SidecarStatus,
 } from './types';
 
 /** Tauri invoke 的拒绝值要么已是 ProtocolError 形状，要么包成 INTERNAL */
@@ -79,6 +80,25 @@ export class TauriIpc implements Ipc {
     try {
       // root 由壳从 settings.data_root 注入（#13 同口径），前端不传参
       return await invoke<DoctorResult>('doctor');
+    } catch (e) {
+      throw asProtocolError(e);
+    }
+  }
+
+  async extractTracking(params: ExtractTrackingParams): Promise<ExtractTrackingResult> {
+    try {
+      // 键 camelCase（docs/02 §2 注）；apiKey 仅联网且用户填写时非空
+      return await invoke<ExtractTrackingResult>('extract_tracking', {
+        mode: params.mode,
+        inPath: params.in_path,
+        oldPath: params.old_path ?? null,
+        outPath: params.out_path ?? null,
+        network: params.network ?? false,
+        apiKey: params.api_key ?? null,
+        audit: params.audit ?? true,
+        resume: params.resume ?? true,
+        force: params.force ?? false,
+      });
     } catch (e) {
       throw asProtocolError(e);
     }

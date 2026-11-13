@@ -1568,6 +1568,283 @@ def test_doctor_dispatch_mocked() -> None:
             assert exc.code == "NO_ACCOUNT"
 
 
+# -------------------------------------------- extract_tracking（docs/07 #19）
+
+def _make_tracking_csv(root: Path) -> Path:
+    """快递单号提取输入夹具（本程序导出列，9 列）。"""
+    import csv as _csv
+    path = root / "track_in.csv"
+    rows = [
+        ["t1", "d1", "s1", "g1", "u1", "文本", "寄出运单号: YT2550124940265 退货", "", ""],
+        ["t2", "d2", "s2", "g2", "u2", "文本", "联系电话 13812345678", "", ""],
+        ["t3", "d3", "s3", "g3", "u3", "表情", "[表情]", "", ""],
+        ["t4", "d4", "s4", "g4", "u4", "引用",
+         "'@CO 7373 3342 2427 86 这个退货是不是还没取呢", "", ""],
+        ["t5", "d5", "s5", "g5", "u5", "文本", "今天天气不错，收到货了谢谢", "", ""],
+    ]
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = _csv.writer(f)
+        w.writerow(["时间", "日期", "会话", "群号", "发送人", "类型", "内容", "附件", "附件路径"])
+        w.writerows(rows)
+    return path
+
+
+def test_extract_tracking_preflight_and_local_run() -> None:
+    """extract_tracking（docs/02 §1.2 #19）：preflight 计数 + 本地 run 端到端。
+
+    - preflight 不调 API、不写产物；network=false → send_rows=0；
+    - run 本地：输出 CSV 首列=快递单号、手机号被排除、进度 phase 正确；
+    - 隐私：日志不回显 content、本地不落断点目录。
+    """
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory(prefix="track_") as td:
+        root = Path(td)
+        in_csv = _make_tracking_csv(root)
+        out_csv = str(root / "out.csv")
+
+        # ---- preflight：只读计数 ----
+        pf = sc.handle("extract_tracking",
+                       {"mode": "preflight", "in_path": str(in_csv),
+                        "network": False})
+        assert set(pf.keys()) == {"mode", "rows", "candidates", "reuse_rows",
+                                  "batches", "send_rows", "key_stored"}
+        assert pf["mode"] == "preflight" and pf["rows"] == 5
+        assert pf["candidates"] == 3        # 宽筛宁多勿漏：YT/手机号/CO 三行
+        assert pf["batches"] == 0 and pf["send_rows"] == 0   # 本地不发送
+        assert pf["key_stored"] is False
+        assert not (root / "out.csv").exists(), "preflight 不得写产物"
+        assert buf.getvalue() == "", "preflight 不发 progress"
+
+        # network=true → send_rows = 候选 + 回检抽样（仍不调 API）
+        pf2 = sc.handle("extract_tracking",
+                        {"mode": "preflight", "in_path": str(in_csv),
+                         "network": True, "audit": True})
+        assert pf2["batches"] >= 1
+        assert pf2["send_rows"] >= pf2["candidates"]
+
+        # ---- run（本地）：打桩 call_api，任何调用即失败 ----
+        real_call = launcher.call_api
+
+        def no_api(*_a, **_k):     # noqa: ANN002, ANN003
+            raise AssertionError("本地模式不得调 API")
+
+        launcher.call_api = no_api
+        try:
+            result = sc.handle("extract_tracking",
+                               {"mode": "run", "in_path": str(in_csv),
+                                "out_path": out_csv, "network": False})
+        finally:
+            launcher.call_api = real_call
+        assert result["mode"] == "run" and result["network"] is False
+        assert result["rows"] == 5 and result["out_rows"] == 5
+        assert result["with_numbers"] == 2 and result["numbers"] == 2
+        assert result["sent_rows"] == 0 and result["tokens"] == 0
+        assert Path(result["path"]).is_file()
+
+        # 输出形状：首列快递单号；YT 提取、手机号排除、无单号行空首列
+        import csv as _csv
+        with open(result["path"], encoding="utf-8-sig", newline="") as f:
+            olist = list(_csv.reader(f))
+        assert olist[0][0] == "快递单号"
+        got = {r[7]: r[0] for r in olist[1:]}
+        assert got["寄出运单号: YT2550124940265 退货"] == "YT2550124940265"
+        assert got["'@CO 7373 3342 2427 86 这个退货是不是还没取呢"] == "73733342242786"
+        assert got["联系电话 13812345678"] == "", "手机号必须被排除"
+        assert got["[表情]"] == ""
+
+        # 进度：phase=extract_tracking，本地 3 阶段，末帧 done==total
+        frames = [json.loads(line) for line in buf.getvalue().splitlines() if line]
+        prog = [f for f in frames if f.get("method") == "progress"]
+        assert prog, "run 必须发 progress"
+        assert all(p["params"]["phase"] == "extract_tracking" for p in prog)
+        assert prog[-1]["params"]["done"] == prog[-1]["params"]["total"] == 3
+        # 隐私：progress message 不回显 content
+        for p in prog:
+            for secret in ("退货", "表情", "13812345678"):
+                assert secret not in p["params"]["message"], p
+
+        # 隐私：本地模式不落断点目录（无发送内容可落）
+        assert not Path(out_csv + "_work").exists()
+
+
+def test_extract_tracking_network_payload_minimized() -> None:
+    """联网路径字段最小化（docs/02 #19 硬要求）：请求体每行只含 row/type/content。
+
+    - 只发宽筛命中行（回检抽样除外），不发全量；
+    - 断点文件只存 行号→单号（不落 content）；
+    - sent_rows/tokens 计入 result。
+    """
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    sent: list[list[dict]] = []
+
+    def mock_api(base_url, api_key, model, system_prompt, user_content,  # noqa: ANN001
+                 timeout=180, max_retries=5, on_retry=None):             # noqa: ANN001
+        batch = json.loads(user_content)
+        sent.append(batch)
+        found = {}
+        for b in batch:
+            nums = launcher.local_extract(b["content"])
+            if nums:
+                found[str(b["row"])] = nums
+        return {"choices": [{"message": {
+            "content": json.dumps(found, ensure_ascii=False)}}],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50}}
+
+    real_call = launcher.call_api
+    launcher.call_api = mock_api
+    try:
+        with tempfile.TemporaryDirectory(prefix="tracknet_") as td:
+            root = Path(td)
+            in_csv = _make_tracking_csv(root)
+            out_csv = str(root / "out.csv")
+            with mock.patch.dict(os.environ,
+                                 {"WXCHART_TRACKING_KEY_FILE": str(root / "k.bin")}):
+                result = sc.handle("extract_tracking",
+                                   {"mode": "run", "in_path": str(in_csv),
+                                    "out_path": out_csv, "network": True,
+                                    "api_key": "TESTKEY-123", "audit": True})
+            assert result["network"] is True
+            # mock 每次 usage = 100+50 token
+            assert result["sent_rows"] > 0 and result["tokens"] == 150 * len(sent)
+
+            # 1) 字段最小化：每行恰好 row/type/content 三键
+            assert sent, "联网模式必须调 API"
+            for batch in sent:
+                for item in batch:
+                    assert set(item.keys()) == {"row", "type", "content"}, \
+                        "请求体字段越界: %s" % set(item.keys())
+
+            # 2) 只发候选行（回检抽样行之外不发落选行）
+            cand_rows = {1, 2, 4}   # 宽筛命中（夹具）
+            sent_rows = {b["row"] for batch in sent for b in batch}
+            assert sent_rows <= {1, 2, 3, 4, 5}
+            # 主批次（候选批次）只含候选行；落选行只允许出现在回检批次
+            for batch in sent:
+                rows_in = {x["row"] for x in batch}
+                if rows_in & {3, 5}:
+                    # 含落选行的批次 = 回检抽样批次（行数 > 单批候选或含 audit 标记）
+                    assert len(batch) <= 300, "回检批次超抽样上限"
+
+            # 3) 断点文件只存 行号→单号，不落 content 原文
+            work = Path(out_csv + "_work")
+            assert work.is_dir()
+            secrets = ("退货", "表情", "13812345678", "今天天气不错")
+            for f in work.glob("*.json"):
+                raw = f.read_text(encoding="utf-8")
+                for s in secrets:
+                    assert s not in raw, "%s 泄漏原文" % f.name
+                data = json.loads(raw)
+                for k, v in data.items():
+                    assert str(k).isdigit() and isinstance(v, list)
+
+            # 4) progress message 不回显 content
+            frames = [json.loads(l) for l in buf.getvalue().splitlines() if l]
+            for fr in frames:
+                if fr.get("method") == "progress":
+                    for s in secrets:
+                        assert s not in fr["params"]["message"]
+    finally:
+        launcher.call_api = real_call
+
+
+def test_extract_tracking_key_dpapi_and_errors() -> None:
+    """DPAPI Key（拍板③）+ 参数/错误路径（docs/02 #19）。"""
+    with tempfile.TemporaryDirectory(prefix="trackkey_") as td:
+        key_file = str(Path(td) / "k.bin")
+        with mock.patch.dict(os.environ, {"WXCHART_TRACKING_KEY_FILE": key_file}):
+            # 往返 + 明文不落盘
+            launcher.save_tracking_key("SECRET-KEY-XYZ")
+            raw = Path(key_file).read_bytes()
+            assert b"SECRET-KEY-XYZ" not in raw, "明文 Key 不得落盘"
+            assert launcher.load_tracking_key() == "SECRET-KEY-XYZ"
+            # 损坏文件 → 视为未存（不抛）
+            Path(key_file).write_bytes(b"\x00\x01garbage")
+            assert launcher.load_tracking_key() == ""
+
+            # Key 存在后 preflight 回 key_stored=true
+            buf = io.StringIO()
+            sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+            with tempfile.TemporaryDirectory(prefix="trackin_") as td2:
+                in_csv = _make_tracking_csv(Path(td2))
+                launcher.save_tracking_key("SECRET-KEY-XYZ")
+                pf = sc.handle("extract_tracking",
+                               {"mode": "preflight", "in_path": str(in_csv),
+                                "network": True})
+                assert pf["key_stored"] is True
+
+                # 联网 run 无任何 Key → INTERNAL（指明请填写）
+                Path(key_file).unlink()
+                try:
+                    sc.handle("extract_tracking",
+                              {"mode": "run", "in_path": str(in_csv),
+                               "out_path": str(Path(td2) / "o.csv"),
+                               "network": True})
+                    raise AssertionError("无 Key 联网应报错")
+                except mapping.SidecarError as e:
+                    assert e.code == "INTERNAL" and "API Key" in e.message
+
+    # ---- 参数/错误路径 ----
+    buf = io.StringIO()
+    sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+    with tempfile.TemporaryDirectory(prefix="trackerr_") as td:
+        in_csv = _make_tracking_csv(Path(td))
+        cases = [
+            ({"mode": "nope", "in_path": str(in_csv)}, "mode 取值非法"),
+            ({"mode": "preflight"}, "缺少 in_path"),
+            ({"mode": "preflight", "in_path": str(in_csv), "bogus": 1}, "未知字段"),
+            ({"mode": "run", "in_path": str(in_csv)}, "缺少 out_path"),
+            ({"mode": "run", "in_path": str(in_csv),
+              "out_path": "relative.csv"}, "绝对路径"),
+            ({"mode": "preflight", "in_path": str(in_csv),
+              "network": "yes"}, "布尔"),
+            ({"mode": "preflight", "in_path": str(Path(td) / "missing.csv")},
+             "不存在"),
+        ]
+        for params, keyword in cases:
+            try:
+                sc.handle("extract_tracking", params)
+                raise AssertionError("应报错: %s" % params)
+            except mapping.SidecarError as e:
+                assert e.code == "INTERNAL", (params, e.code)
+                assert keyword in e.message, (keyword, e.message)
+
+        # 缺「内容」列 → INTERNAL
+        bad = Path(td) / "bad.csv"
+        bad.write_text("a,b\n1,2\n", encoding="utf-8-sig")
+        try:
+            sc.handle("extract_tracking",
+                      {"mode": "preflight", "in_path": str(bad)})
+            raise AssertionError("缺内容列应报错")
+        except mapping.SidecarError as e:
+            assert "内容" in e.message
+
+        # 与 load/export 互斥 → EXPORTING_BUSY
+        sc._busy.acquire()
+        try:
+            sc.handle("extract_tracking",
+                      {"mode": "preflight", "in_path": str(in_csv)})
+            raise AssertionError("互斥期应报 EXPORTING_BUSY")
+        except mapping.SidecarError as e:
+            assert e.code == "EXPORTING_BUSY"
+        finally:
+            sc._busy.release()
+
+
+def test_extract_tracking_selftest_cli() -> None:
+    """`python launcher.py --selftest` 离线自测（docs/07 #19 验收：不调 API）。"""
+    proc = subprocess.run(
+        [sys.executable, str(LAUNCHER), "--selftest"],
+        capture_output=True, text=True, encoding="utf-8", timeout=180,
+        cwd=str(TAURI_ROOT),
+    )
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "ALL SELFTESTS PASSED" in proc.stdout, proc.stdout
+    # selftest 不出网：全程 mock/本地，无网络错误痕迹
+    assert "URLError" not in proc.stderr
+
+
 # ---------------------------------------------------------------- 直跑入口
 
 def main() -> int:

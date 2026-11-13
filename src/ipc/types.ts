@@ -26,7 +26,11 @@ export interface ProtocolError {
 
 /** 侧边可注入的错误（MockIpc 测试用） */
 export type ErrorInjection = Partial<
-  Record<'loadData' | 'exportMessages' | 'scanAccounts' | 'appInfo' | 'resolveMedia' | 'doctor', ErrorCode>
+  Record<
+    | 'loadData' | 'exportMessages' | 'scanAccounts' | 'appInfo' | 'resolveMedia' | 'doctor'
+    | 'extractTracking',
+    ErrorCode
+  >
 >;
 
 // ---------------------------------------------------------------- 通道③ 数据形状（docs/02 §1.3）
@@ -160,6 +164,58 @@ export interface DoctorResult {
   messages?: number;
 }
 
+// ------------------------------------------- extract_tracking（docs/02 §1.2 #19）
+
+/** `extract_tracking` 参数（通道③ snake_case；invoke 层转 camelCase，docs/02 §2） */
+export interface ExtractTrackingParams {
+  mode: 'preflight' | 'run';
+  in_path: string;
+  /** 旧成品 CSV（首列=快递单号）→ 增量复用；缺省不复用 */
+  old_path?: string;
+  /** run 必填（绝对路径）；preflight 可省 */
+  out_path?: string;
+  /** 联网 AI 审核：**默认 false=纯本地**（docs/07 #19 拍板①） */
+  network?: boolean;
+  /** network=true 时提供；DPAPI 加密存本机，不回传不入库（拍板③） */
+  api_key?: string;
+  /** 抽样回检（仅 network=true 有意义） */
+  audit?: boolean;
+  resume?: boolean;
+  force?: boolean;
+}
+
+/** preflight result（docs/02 §1.2 #19）：只读计数，不调 API 不写产物 */
+export interface TrackingPreflight {
+  mode: 'preflight';
+  rows: number;
+  /** 宽筛命中行数（= 联网时发送行数上限） */
+  candidates: number;
+  reuse_rows: number;
+  /** 联网时预估批次数（本地=0） */
+  batches: number;
+  /** 实际将发送行数（含回检抽样；network=false 时=0）——UI 明示用 */
+  send_rows: number;
+  /** 本机是否已有 DPAPI 存储的 API Key */
+  key_stored: boolean;
+}
+
+/** run result（docs/02 §1.2 #19） */
+export interface TrackingRunResult {
+  mode: 'run';
+  path: string;
+  rows: number;
+  out_rows: number;
+  with_numbers: number;
+  numbers: number;
+  reused_rows: number;
+  sent_rows: number;
+  tokens: number;
+  elapsed: number;
+  network: boolean;
+}
+
+export type ExtractTrackingResult = TrackingPreflight | TrackingRunResult;
+
 export interface PingResult {
   protocol_version: number;
   app_version: string;
@@ -237,6 +293,8 @@ export interface Ipc {
   exportMessages(params: ExportParams): Promise<ExportResult>;
   /** 数据层自检（docs/02 §1.2 `doctor`）：账号/密钥/逐库解密/消息数 */
   doctor(): Promise<DoctorResult>;
+  /** 快递单号提取（docs/02 §1.2 `extract_tracking` #19）：preflight 计数 / run 执行 */
+  extractTracking(params: ExtractTrackingParams): Promise<ExtractTrackingResult>;
   openPath(path: string): Promise<{ ok: boolean }>;
   revealPath(path: string): Promise<{ ok: boolean }>;
   /** 读应用设置（docs/02 §2；文件缺失/损坏 → 默认空串） */

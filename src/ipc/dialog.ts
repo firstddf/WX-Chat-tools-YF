@@ -35,3 +35,20 @@ export async function pickDir(defaultPath?: string): Promise<string | null> {
   }
   return 'C:/mock/local-data';
 }
+
+/** 打开文件选择（快递单号提取的输入 CSV，docs/07 #19）；浏览器回建议路径便于断言。 */
+export async function pickOpenPath(suggestion: string): Promise<string | null> {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    try {
+      const p = await open({
+        title: '选择 CSV 文件',
+        filters: [{ name: 'CSV', extensions: ['csv'] }],
+        defaultPath: suggestion,
+      });
+      return typeof p === 'string' ? p : null;
+    } catch {
+      return null;
+    }
+  }
+  return suggestion;
+}

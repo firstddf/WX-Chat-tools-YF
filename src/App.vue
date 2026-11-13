@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// 应用外壳：账号栏（三个标签页共用）+ 标签页（导出 / 数据筛选 / 聊天数据管理，顺序照 Tk
-// gui.py:103/158/160）+ sidecar 状态横幅 + store 装配。
+// 应用外壳：账号栏（各标签页共用）+ 标签页（导出 / 数据筛选 / 聊天数据管理 / 快递单号提取，
+// 前三个顺序照 Tk gui.py:103/158/160，#19 新页追加末尾）+ sidecar 状态横幅 + store 装配。
 import { computed, onMounted, onUnmounted, provide, ref } from 'vue';
 import { useIpc } from './ipc/context';
 import { createStore, STORE_KEY } from './state/store';
@@ -9,6 +9,7 @@ import FilterPanel from './components/FilterPanel.vue';
 import ChatList from './components/ChatList.vue';
 import ExportPage from './components/ExportPage.vue';
 import MessageList from './components/MessageList.vue';
+import TrackingPage from './components/TrackingPage.vue';
 
 const ipc = useIpc();
 const store = createStore(ipc);
@@ -16,7 +17,7 @@ provide(STORE_KEY, store);
 void store.init();
 
 // 默认激活页仍为「数据筛选」（docs/07 #17 拍板 A5）：43 条 e2e 与真机脚本的隐式默认页口径
-const tab = ref<'export' | 'filter' | 'manage'>('filter');
+const tab = ref<'export' | 'filter' | 'manage' | 'tracking'>('filter');
 const filterPanelRef = ref<InstanceType<typeof FilterPanel> | null>(null);
 const chatListRef = ref<InstanceType<typeof ChatList> | null>(null);
 const exportPageRef = ref<InstanceType<typeof ExportPage> | null>(null);
@@ -96,6 +97,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
       >
         聊天数据管理
       </button>
+      <button
+        type="button"
+        :class="{ active: tab === 'tracking' }"
+        data-testid="tab_tracking"
+        @click="tab = 'tracking'"
+      >
+        快递单号提取
+      </button>
     </div>
 
     <div v-if="banner" class="banner" data-testid="sidecar_banner">{{ banner }}</div>
@@ -123,6 +132,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKeydown));
 
       <div v-show="tab === 'manage'" class="tabpage" data-testid="page_manage">
         <ChatList ref="chatListRef" @to-filter="onToFilter" />
+      </div>
+
+      <div v-show="tab === 'tracking'" class="tabpage" data-testid="page_tracking">
+        <TrackingPage />
       </div>
     </template>
   </div>

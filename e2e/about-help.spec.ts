@@ -11,7 +11,7 @@ test('关于 #18 弹窗：版本 / 协议版本 / 构建信息 / 作者 / 仓库
   const modal = page.getByTestId('about_modal');
   await expect(modal).toBeVisible();
   await expect(page.getByTestId('about_name')).toHaveText('微信聊天记录工具');
-  await expect(page.getByTestId('about_version')).toHaveText('0.1.0');
+  await expect(page.getByTestId('about_version')).toHaveText('0.2.0');
   await expect(page.getByTestId('about_protocol')).toHaveText(/^\d+$/);
   await expect(page.getByTestId('about_sidecar')).toHaveText(/ready|starting|failed|mismatch|restarted/);
   // 构建信息 = 构建时间 · git 提交号（vite define 注入）

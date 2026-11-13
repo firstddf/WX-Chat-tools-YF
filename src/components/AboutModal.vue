@@ -61,7 +61,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 
         <div class="about-note" data-testid="about_privacy">
           隐私：微信数据<b>只读</b>访问，程序从不写入；消息与附件只在本机读取与导出，
-          <b>不联网、不上传</b>；解密所需密钥仅从微信进程内存读取，不落盘、不写入日志。
+          除「快递单号提取」页<b>可选的</b>联网审核（默认关闭）外<b>不联网、不上传</b>；
+          解密所需密钥仅从微信进程内存读取，不落盘、不写入日志。
         </div>
         <div class="about-note" data-testid="about_license">
           许可：PolyForm Noncommercial License 1.0.0（仅限非商业用途，详见仓库 LICENSE）。

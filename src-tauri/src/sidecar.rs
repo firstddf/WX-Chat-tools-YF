@@ -58,6 +58,13 @@ pub const EXPORT_TIMEOUT: Duration = Duration::from_secs(900);
 /// doctor（数据层自检）超时 30s（docs/02 §2 / docs/07 #3）：
 /// 要为全部库解密（冷缓存首解可达数十秒），DEFAULT 10s 不够。
 pub const DOCTOR_TIMEOUT: Duration = Duration::from_secs(30);
+/// extract_tracking preflight 超时 60s（docs/02 §2 #19）：本地读 CSV + 宽筛，
+/// 大文件（10 万行级）正则扫描数秒，10s 无余量。
+pub const PREFLIGHT_TIMEOUT: Duration = Duration::from_secs(60);
+/// extract_tracking run 超时 7200s（docs/02 §2 #19）。
+/// 联网审核长跑（源工具自估 1000 候选行 ≈20–40 分钟，批次重试上界更长）——
+/// 900s 会顶穿；期间 sidecar 发 progress 保活。超时/中断后重跑按断点续跑补齐。
+pub const EXTRACT_TIMEOUT: Duration = Duration::from_secs(7200);
 /// 崩溃重启退避 500ms（docs/03 §3）
 const RESTART_BACKOFF: Duration = Duration::from_millis(500);
 /// stop 后等 EOF 的上限 2s（docs/03 §3）

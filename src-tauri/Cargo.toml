@@ -1,6 +1,6 @@
 [package]
 name = "wxchart-tauri"
-version = "0.1.0"
+version = "0.2.0"
 description = "微信聊天记录工具 · Tauri 2 原生壳（Phase 2A）"
 authors = ["wxchart"]
 edition = "2021"
