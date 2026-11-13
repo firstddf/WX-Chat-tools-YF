@@ -868,3 +868,24 @@ test('A2 #30 注入 KEY_NOT_FOUND → 中文文案、应用不白屏', async ({ 
   // 已加载数据为空 + 错误只走文案，不抛运行时异常
   expect(pageErrors).toEqual([]);
 });
+
+// ---------------------------------------------------------------- 2026-11-13 BUG1
+
+test('BUG1 账号栏「加载数据」：在导出页直接加载，不必先跳「数据筛选」', async ({ page }) => {
+  await gotoAndInstall(page);
+
+  // 停在导出页（默认页是数据筛选，这里先切过去模拟用户场景）
+  await page.getByTestId('tab_export').click();
+  await expect(page.getByTestId('page_export')).toBeVisible();
+  await expect(page.getByTestId('exp_empty')).toContainText('没有可用的聊天数据');
+
+  // 账号栏一键加载 → 会话列表直接有数据（状态行在筛选页，切回可见）
+  await page.getByTestId('btn_load_data').click();
+  await expect(page.getByTestId('exp_chat_row')).toHaveCount(FIXTURE_CHATS.length, {
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId('exp_empty')).toHaveCount(0);
+
+  // 加载后按钮复位可再点
+  await expect(page.getByTestId('btn_load_data')).toHaveText('加载数据');
+});

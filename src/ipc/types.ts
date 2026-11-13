@@ -166,16 +166,29 @@ export interface DoctorResult {
 
 // ------------------------------------------- extract_tracking（docs/02 §1.2 #19）
 
+/** 联网 AI 服务商（2026-11-13 BUG2 多选）：预设三家 + 自定义（base_url/model 自填） */
+export type TrackingProvider = 'deepseek' | 'mimo' | 'minimax' | 'custom';
+
 /** `extract_tracking` 参数（通道③ snake_case；invoke 层转 camelCase，docs/02 §2） */
 export interface ExtractTrackingParams {
-  mode: 'preflight' | 'run';
-  in_path: string;
+  /** `key` = 只管理本机已存 Key（保存/清除/查询），不读文件不调 API（2026-11-13 增补） */
+  mode: 'preflight' | 'run' | 'key';
+  /** mode=key 可省；其余必给 */
+  in_path?: string;
   /** 旧成品 CSV（首列=快递单号）→ 增量复用；缺省不复用 */
   old_path?: string;
   /** run 必填（绝对路径）；preflight 可省 */
   out_path?: string;
   /** 联网 AI 审核：**默认 false=纯本地**（docs/07 #19 拍板①） */
   network?: boolean;
+  /** network=true 时提供；DPAPI 加密存本机，不回传不入库（拍板③）；缺省 mimo（旧口径） */
+  provider?: TrackingProvider;
+  /** provider=custom 且 network=true 时必给；预设商忽略此参数 */
+  base_url?: string;
+  /** provider=custom 且 network=true 时必给；预设商忽略此参数 */
+  model?: string;
+  /** mode=key：true=清除该服务商已存 Key；false/缺省=保存（带 api_key）或查询 */
+  clear_key?: boolean;
   /** network=true 时提供；DPAPI 加密存本机，不回传不入库（拍板③） */
   api_key?: string;
   /** 抽样回检（仅 network=true 有意义） */
@@ -195,7 +208,7 @@ export interface TrackingPreflight {
   batches: number;
   /** 实际将发送行数（含回检抽样；network=false 时=0）——UI 明示用 */
   send_rows: number;
-  /** 本机是否已有 DPAPI 存储的 API Key */
+  /** 本机是否已存**当前服务商**的 API Key（mode=key 查询/保存后同样回此字段） */
   key_stored: boolean;
 }
 
@@ -214,7 +227,13 @@ export interface TrackingRunResult {
   network: boolean;
 }
 
-export type ExtractTrackingResult = TrackingPreflight | TrackingRunResult;
+/** mode=key result（2026-11-13 BUG2）：只回本机该服务商 Key 是否已存（不回明文） */
+export interface TrackingKeyResult {
+  mode: 'key';
+  key_stored: boolean;
+}
+
+export type ExtractTrackingResult = TrackingPreflight | TrackingRunResult | TrackingKeyResult;
 
 export interface PingResult {
   protocol_version: number;

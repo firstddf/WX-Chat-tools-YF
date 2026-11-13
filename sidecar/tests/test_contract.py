@@ -1832,6 +1832,103 @@ def test_extract_tracking_key_dpapi_and_errors() -> None:
             sc._busy.release()
 
 
+def test_extract_tracking_key_mode_and_provider_slots() -> None:
+    """mode=key + 服务商分槽（2026-11-13 BUG2，docs/02 §1.2 增补）。
+
+    - mode=key：带 api_key 保存 / clear_key 清除 / 都不带给查询；不读文件不调 API；
+    - Key 按 provider 分槽 DPAPI 加密、互不覆盖、明文不落盘；
+    - provider 非法 → INTERNAL；custom 缺 base_url/model（network=true）→ INTERNAL；
+    - 预设商 run 走各自 base_url/model。
+    """
+    with tempfile.TemporaryDirectory(prefix="trackkey2_") as td:
+        key_base = str(Path(td) / "k.bin")
+        with mock.patch.dict(os.environ, {"WXCHART_TRACKING_KEY_FILE": key_base}):
+            buf = io.StringIO()
+            sc = launcher.Sidecar(launcher.NdjsonWriter(buf))
+
+            # 初始查询：两槽都未存（mode=key 不要求 in_path）
+            q1 = sc.handle("extract_tracking", {"mode": "key", "provider": "deepseek"})
+            assert q1 == {"mode": "key", "key_stored": False}
+
+            # 保存 deepseek → 该槽已存；明文不落盘
+            s1 = sc.handle("extract_tracking",
+                           {"mode": "key", "provider": "deepseek",
+                            "api_key": "DS-SECRET-1"})
+            assert s1 == {"mode": "key", "key_stored": True}
+            ds_file = Path(launcher.tracking_key_path("deepseek"))
+            assert ds_file.is_file()
+            assert b"DS-SECRET-1" not in ds_file.read_bytes(), "明文 Key 不得落盘"
+
+            # 分槽：mimo 槽不受影响（缺省 provider = mimo = 旧口径）
+            q2 = sc.handle("extract_tracking", {"mode": "key"})
+            assert q2 == {"mode": "key", "key_stored": False}
+
+            # 自定义槽保存 + 查询
+            sc.handle("extract_tracking",
+                      {"mode": "key", "provider": "custom", "api_key": "CU-SECRET-2"})
+            q3 = sc.handle("extract_tracking", {"mode": "key", "provider": "custom"})
+            assert q3["key_stored"] is True
+
+            # 清除 deepseek 槽：只清本槽（custom 仍存）
+            c1 = sc.handle("extract_tracking",
+                           {"mode": "key", "provider": "deepseek", "clear_key": True})
+            assert c1 == {"mode": "key", "key_stored": False}
+            assert not ds_file.exists()
+            q4 = sc.handle("extract_tracking", {"mode": "key", "provider": "custom"})
+            assert q4["key_stored"] is True, "清除不得跨槽"
+
+            # provider 非法
+            try:
+                sc.handle("extract_tracking", {"mode": "key", "provider": "bogus"})
+                raise AssertionError("非法 provider 应报错")
+            except mapping.SidecarError as e:
+                assert e.code == "INTERNAL" and "provider" in e.message
+
+            # clear_key 非布尔
+            try:
+                sc.handle("extract_tracking",
+                          {"mode": "key", "provider": "mimo", "clear_key": "yes"})
+                raise AssertionError("clear_key 非布尔应报错")
+            except mapping.SidecarError as e:
+                assert "布尔" in e.message
+
+            # custom + network 缺 base_url/model → run 报错（不读完文件才炸）
+            with tempfile.TemporaryDirectory(prefix="trackin2_") as td2:
+                in_csv = _make_tracking_csv(Path(td2))
+                try:
+                    sc.handle("extract_tracking",
+                              {"mode": "run", "in_path": str(in_csv),
+                               "out_path": str(Path(td2) / "o.csv"),
+                               "network": True, "provider": "custom",
+                               "api_key": "X"})
+                    raise AssertionError("custom 缺 base_url/model 应报错")
+                except mapping.SidecarError as e:
+                    assert "base_url" in e.message
+
+                # 预设商 run：cfg 用各自 base_url/model（打桩 call_api 截获）
+                real_call = launcher.call_api
+                seen: list[tuple[str, str]] = []
+
+                def grab_api(base_url, api_key, model, system_prompt,  # noqa: ANN001
+                             user_content, timeout=180, max_retries=5,  # noqa: ANN001
+                             on_retry=None):                           # noqa: ANN001
+                    seen.append((base_url, model))
+                    return {"choices": [{"message": {"content": "{}"}}],
+                            "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+
+                launcher.call_api = grab_api
+                try:
+                    sc.handle("extract_tracking",
+                              {"mode": "run", "in_path": str(in_csv),
+                               "out_path": str(Path(td2) / "o2.csv"),
+                               "network": True, "provider": "deepseek",
+                               "api_key": "DS-KEY", "audit": False})
+                finally:
+                    launcher.call_api = real_call
+                assert seen, "联网 run 必须调 API"
+                assert seen[0] == ("https://api.deepseek.com/v1", "deepseek-chat"), seen[0]
+
+
 def test_extract_tracking_selftest_cli() -> None:
     """`python launcher.py --selftest` 离线自测（docs/07 #19 验收：不调 API）。"""
     proc = subprocess.run(

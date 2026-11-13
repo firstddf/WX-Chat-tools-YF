@@ -451,16 +451,41 @@ class Sidecar:
         - ``mode="preflight"``：读文件 + 增量复用 + 宽筛计数——**不调 API、不写产物**，
           返回规模与 ``send_rows``（联网时 UI 据此明示「将把 N 行发送到第三方 API」）；
         - ``mode="run"``：完整流水线。``network=false``（默认）纯本地规则提取；
-          ``network=true`` 分批调 MiMo API（需 Key：params 给定或本机 DPAPI 已存）；
+          ``network=true`` 分批调 AI API（需 Key：params 给定或本机 DPAPI 已存）；
+        - ``mode="key"``（2026-11-13 BUG2）：只管本机 Key——带 ``api_key`` 保存、
+          ``clear_key`` 清除、否则查询；按 ``provider`` 分槽 DPAPI 加密，不读文件不调 API；
+        - 服务商：``provider`` ∈ deepseek|mimo|minimax|custom（缺省 mimo，旧口径），
+          custom 的 base_url/model 由 params 自填；
         - 参数白名单（未知键 → INTERNAL，同 set_settings 口径）；与 load/export 互斥。
         """
         for key in params:
             if key not in TRACK_PARAM_KEYS:
                 raise SidecarError("INTERNAL", "extract_tracking 未知字段: %s" % key)
         mode = params.get("mode")
-        if mode not in ("preflight", "run"):
+        if mode not in ("preflight", "run", "key"):
             raise SidecarError(
-                "INTERNAL", "mode 取值非法: %r（应为 preflight|run）" % (mode,))
+                "INTERNAL", "mode 取值非法: %r（应为 preflight|run|key）" % (mode,))
+        provider = params.get("provider") or "mimo"
+        if not isinstance(provider, str) or provider not in (
+                *TRACK_PROVIDERS, "custom"):
+            raise SidecarError(
+                "INTERNAL", "provider 取值非法: %r（应为 deepseek|mimo|minimax|custom）"
+                % (provider,))
+        api_key = params.get("api_key", "")
+        if not isinstance(api_key, str):
+            raise SidecarError("INTERNAL", "api_key 非预期类型（应为字符串）")
+        clear_key = params.get("clear_key", False)
+        if not isinstance(clear_key, bool):
+            raise SidecarError("INTERNAL", "clear_key 非预期类型（应为布尔）")
+
+        # ---- mode=key：只管本机 Key（保存/清除/查询），不碰文件与 API ----
+        if mode == "key":
+            if clear_key:
+                clear_tracking_key(provider)
+            elif api_key:
+                save_tracking_key(api_key, provider)
+            return {"mode": "key", "key_stored": bool(load_tracking_key(provider))}
+
         in_path = params.get("in_path")
         if not isinstance(in_path, str) or not in_path:
             raise SidecarError("INTERNAL", "extract_tracking 缺少 in_path")
@@ -480,13 +505,10 @@ class Sidecar:
             if not isinstance(val, bool):
                 raise SidecarError(
                     "INTERNAL", "%s 非预期类型（应为布尔）" % name)
-        api_key = params.get("api_key", "")
-        if not isinstance(api_key, str):
-            raise SidecarError("INTERNAL", "api_key 非预期类型（应为字符串）")
         if api_key:
-            # 非空 → DPAPI 加密落盘（覆盖旧值）；空 → 用本机已存 Key
-            save_tracking_key(api_key)
-        key_stored = bool(load_tracking_key())
+            # 非空 → DPAPI 加密落盘到该服务商槽（覆盖旧值）；空 → 用本机已存 Key
+            save_tracking_key(api_key, provider)
+        key_stored = bool(load_tracking_key(provider))
 
         if mode == "preflight":
             try:
@@ -512,7 +534,19 @@ class Sidecar:
             raise SidecarError("INTERNAL", "extract_tracking 缺少 out_path（mode=run）")
         if not os.path.isabs(out_path):
             raise SidecarError("INTERNAL", "extract_tracking 的 out_path 必须是绝对路径")
-        key = api_key or load_tracking_key()
+        # 服务商 → base_url/model（2026-11-13 BUG2）：预设查表，custom 自填必给
+        if provider == "custom":
+            base_url = params.get("base_url") or ""
+            model = params.get("model") or ""
+            if not isinstance(base_url, str) or not isinstance(model, str):
+                raise SidecarError(
+                    "INTERNAL", "base_url/model 非预期类型（应为字符串）")
+            if network and (not base_url.strip() or not model.strip()):
+                raise SidecarError(
+                    "INTERNAL", "自定义服务商需填写 base_url 与 model")
+        else:
+            base_url, model = TRACK_PROVIDERS[provider]
+        key = api_key or load_tracking_key(provider)
         if network and not key:
             raise SidecarError("INTERNAL", "联网审核需要 API Key（请先填写并保存）")
 
@@ -530,7 +564,7 @@ class Sidecar:
         cfg = {
             "in_path": in_path, "old_path": old_path, "out_path": out_path,
             "network": network, "audit": audit, "resume": resume, "force": force,
-            "api_key": key, "base_url": TRACK_BASE_URL, "model": TRACK_MODEL,
+            "api_key": key, "base_url": base_url, "model": model,
             "work_dir": out_path + "_work",
         }
         stats: dict[str, Any] = {
@@ -847,6 +881,13 @@ def _error_frame(rid: Any, code: str, message: str, detail: str = "") -> dict[st
 
 TRACK_BASE_URL = "https://api.xiaomimimo.com/v1"
 TRACK_MODEL = "mimo-v2.6-flash"
+# 服务商预设（2026-11-13 BUG2 多选）：provider → (base_url, model)；
+# custom 不在此表——由 params.base_url/model 自填（network=true 时二者必给）。
+TRACK_PROVIDERS: dict[str, tuple[str, str]] = {
+    "deepseek": ("https://api.deepseek.com/v1", "deepseek-chat"),
+    "mimo": (TRACK_BASE_URL, TRACK_MODEL),
+    "minimax": ("https://api.minimaxi.com/v1", "MiniMax-M2"),
+}
 TRACK_CONCURRENCY = 6
 TRACK_BATCH_CHARS = 9000
 TRACK_BATCH_ROWS = 110
@@ -855,6 +896,7 @@ TRACK_AUDIT_ROWS = 300
 TRACK_PARAM_KEYS = frozenset({
     "mode", "in_path", "old_path", "out_path", "network",
     "api_key", "audit", "resume", "force",
+    "provider", "base_url", "model", "clear_key",
 })
 
 # AI 审核规则（源工具 RULES 逐字搬入——联网模式的 system prompt）
@@ -1386,16 +1428,22 @@ def track_pipeline(cfg: dict[str, Any], log: Any, progress_cb: Any,
 
 # ---------------------------------------------------- DPAPI Key 存储（#19 拍板③）
 
-def tracking_key_path() -> Path:
-    """Key 文件：`%APPDATA%\\com.wxchart.app\\tracking.key`（不入库、不进 settings.json）。
+def tracking_key_path(provider: str = "mimo") -> Path:
+    """Key 文件：`%APPDATA%\\com.wxchart.app\\tracking[_<provider>].key`（不入库、不进 settings.json）。
 
+    按服务商分槽（2026-11-13 BUG2）：mimo 槽沿用旧文件名 `tracking.key`（升级不丢已存 Key），
+    其余为 `tracking_<provider>.key`。
     测试钩子 `WXCHART_TRACKING_KEY_FILE` 可重定向（隔离用，不改协议）。
     """
     override = os.environ.get("WXCHART_TRACKING_KEY_FILE")
     if override:
-        return Path(override)
+        base = Path(override)
+        if provider == "mimo":
+            return base
+        return base.with_name(f"tracking_{provider}{base.suffix or '.key'}")
     appdata = os.environ.get("APPDATA") or str(Path.home())
-    return Path(appdata) / "com.wxchart.app" / "tracking.key"
+    name = "tracking.key" if provider == "mimo" else f"tracking_{provider}.key"
+    return Path(appdata) / "com.wxchart.app" / name
 
 
 def _dpapi(data: bytes, unprotect: bool) -> bytes:
@@ -1425,28 +1473,36 @@ def _dpapi(data: bytes, unprotect: bool) -> bytes:
             ctypes.cast(blob_out.pbData, ctypes.c_void_p))
 
 
-def save_tracking_key(key: str) -> None:
-    """DPAPI 加密落盘（原子写）。明文绝不进文件。"""
+def save_tracking_key(key: str, provider: str = "mimo") -> None:
+    """DPAPI 加密落盘到该服务商槽（原子写）。明文绝不进文件。"""
     try:
         blob = _dpapi(key.encode("utf-8"), unprotect=False)
-        path = tracking_key_path()
+        path = tracking_key_path(provider)
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
+        tmp = path.parent / (path.name + ".tmp")
         tmp.write_bytes(blob)
         os.replace(tmp, path)
     except OSError as e:
         raise SidecarError("INTERNAL", "API Key 加密保存失败", str(e)) from e
 
 
-def load_tracking_key() -> str:
-    """读回 Key；文件缺失/损坏/跨机器不可解 → 空串（视为未存）。"""
-    path = tracking_key_path()
+def load_tracking_key(provider: str = "mimo") -> str:
+    """读回该服务商槽的 Key；文件缺失/损坏/跨机器不可解 → 空串（视为未存）。"""
+    path = tracking_key_path(provider)
     if not path.is_file():
         return ""
     try:
         return _dpapi(path.read_bytes(), unprotect=True).decode("utf-8")
     except Exception:  # noqa: BLE001 - 损坏按未存处理
         return ""
+
+
+def clear_tracking_key(provider: str = "mimo") -> None:
+    """删除该服务商槽（「清除已存 Key」，2026-11-13 BUG2）。文件不存在视为已清。"""
+    try:
+        tracking_key_path(provider).unlink(missing_ok=True)
+    except OSError as e:
+        raise SidecarError("INTERNAL", "API Key 清除失败", str(e)) from e
 
 
 # ------------------------------------------------------------------ 自测（#19）

@@ -72,8 +72,9 @@ export class MockIpc implements Ipc {
   private statusCbs = new Set<(s: SidecarStatus) => void>();
   /** 已导出过的数据包目录（export_state 等价物：同目录二跑才可能 incremental） */
   private bundleDirs = new Set<string>();
-  /** 是否已存 DPAPI Key（extractTracking 带 api_key 跑过后为 true；preflight 回显用） */
-  trackingKeyStored = false;
+  /** 已存 DPAPI Key 的服务商集合（extractTracking 带 api_key 跑过/保存过为在集合内；
+   *  preflight/key 查询回显用。缺省空 = 未存，与 DPAPI 首装口径一致） */
+  trackingKeyProviders = new Set<string>();
 
   constructor(opts: MockIpcOptions = {}) {
     this.errors = { ...opts.errors };
@@ -115,7 +116,7 @@ export class MockIpc implements Ipc {
     this.fail('appInfo');
     return {
       name: '微信聊天记录工具',
-      version: '0.2.0',
+      version: '0.2.1',
       protocol_version: PROTOCOL_VERSION,
       sidecar: { state: 'ready', protocol_version: PROTOCOL_VERSION },
     };
@@ -229,11 +230,18 @@ export class MockIpc implements Ipc {
    * preflight：rows=11796、候选 42、复用 7——network=false → send_rows=0；
    * network=true+audit → 候选 42 + 回检抽样 300 → 342（UI 披露行数断言用）。
    * run：回显合成统计并发一条 progress（phase=extract_tracking）。
+   * mode=key（2026-11-13 BUG2）：按 provider 分槽保存/清除/查询（DPAPI 语义等价）。
    */
   async extractTracking(params: ExtractTrackingParams): Promise<ExtractTrackingResult> {
     this.calls.push({ method: 'extractTracking', params });
     await delay(this.latencyMs);
     this.fail('extractTracking');
+    const provider = params.provider ?? 'mimo'; // 缺省槽 = 旧单 Key 口径
+    if (params.mode === 'key') {
+      if (params.clear_key) this.trackingKeyProviders.delete(provider);
+      else if (params.api_key) this.trackingKeyProviders.add(provider);
+      return { mode: 'key', key_stored: this.trackingKeyProviders.has(provider) };
+    }
     if (params.mode === 'preflight') {
       const network = params.network ?? false;
       const audit = params.audit ?? true;
@@ -246,11 +254,11 @@ export class MockIpc implements Ipc {
         reuse_rows: 7,
         batches: network ? 1 : 0,
         send_rows: sendRows,
-        key_stored: this.trackingKeyStored,
+        key_stored: this.trackingKeyProviders.has(provider),
       };
     }
     const network = params.network ?? false;
-    if (params.api_key) this.trackingKeyStored = true; // 保存语义（sidecar DPAPI 落盘等价）
+    if (params.api_key) this.trackingKeyProviders.add(provider); // 保存语义（sidecar DPAPI 落盘等价）
     this.emitProgress({
       phase: 'extract_tracking', done: 1, total: 1, message: '导出完成',
     });

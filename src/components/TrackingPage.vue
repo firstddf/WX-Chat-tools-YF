@@ -4,8 +4,10 @@
 // 用户可选（默认关、显式开启、可随时不用）；联网声明按页隔离——本页是全程序唯一
 // 可联网处，零外链断言（security.spec C）在默认态仍须 0（披露文案为纯文本，不加 <a>）。
 // 拍板③：API Key DPAPI 加密存本机（不回传不入库）；上传去隐私——UI 明示将发送行数
-// 与去向（api.xiaomimimo.com），行数取 preflight 的 send_rows（候选 + 回检抽样）。
-// 参数走 docs/02 §1.2 extract_tracking（preflight/run）。
+// 与去向，行数取 preflight 的 send_rows（候选 + 回检抽样）。
+// 2026-11-13 BUG2：服务商多选（deepseek/mimo/minimax/custom，披露去向随 base_url），
+// Key 按服务商分槽加密、显式「保存/清除」走 mode=key（不必等预检）。
+// 参数走 docs/02 §1.2 extract_tracking（preflight/run/key）。
 import { computed, inject, ref, watch } from 'vue';
 import { pickOpenPath, pickSavePath } from '../ipc/dialog';
 import type {
@@ -29,17 +31,50 @@ const resume = ref(true);   // 断点续跑
 const network = ref(false); // 拍板①：默认纯本地
 const apiKey = ref('');      // 显式填写才传（DPAPI 落盘在 sidecar）
 const preflight = ref<TrackingPreflight | null>(null);
-const keyStored = ref(false); // preflight 回显：本机是否已存 Key
+const keyStored = ref(false); // preflight/key 查询回显：该服务商是否已存 Key
+
+// ---------------------------------------------------------------- 服务商（2026-11-13 BUG2）
+
+type Provider = 'deepseek' | 'mimo' | 'minimax' | 'custom';
+/** 预设服务商 → 默认 base_url/model（sidecar TRACK_PROVIDERS 同款，展示用） */
+const PRESETS: Record<Exclude<Provider, 'custom'>, { label: string; base: string; model: string }> = {
+  deepseek: { label: 'DeepSeek', base: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  mimo: { label: '小米 MiMo', base: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.6-flash' },
+  minimax: { label: 'MiniMax', base: 'https://api.minimaxi.com/v1', model: 'MiniMax-M2' },
+};
+const provider = ref<Provider>('mimo'); // 缺省 mimo = 旧单 Key 口径
+const customBase = ref('');
+const customModel = ref('');
+
+const isCustom = computed(() => provider.value === 'custom');
+/** 当前预设的模型名（非 custom 时展示用） */
+const presetModel = computed(() =>
+  isCustom.value ? '' : PRESETS[provider.value as Exclude<Provider, 'custom'>].model,
+);
+/** 当前生效的 base_url（自定义未填时回空，披露文案据此显示去向） */
+const activeBase = computed(() =>
+  isCustom.value ? customBase.value.trim() : PRESETS[provider.value as Exclude<Provider, 'custom'>].base,
+);
+/** 去向主机名（披露框/日志用；自定义未填时显示占位） */
+const destHost = computed(() => {
+  const b = activeBase.value;
+  if (!b) return isCustom.value ? '自定义 API' : '';
+  try {
+    return new URL(b).host;
+  } catch {
+    return b;
+  }
+});
 
 const running = ref(false);
 const notice = ref('');
 const logLines = ref<string[]>([]);
 
-/** 披露行数：联网开启时明示「将把 N 行消息文本发送到第三方 API」（拍板③） */
+/** 披露行数：联网开启时明示「将把 N 行消息文本发送到第三方 API」（拍板③；去向随服务商） */
 const sendRows = computed(() => (network.value ? (preflight.value?.send_rows ?? 0) : 0));
 const disclosure = computed(() =>
   network.value
-    ? `将把 ${sendRows.value} 行消息文本发送到第三方 API（api.xiaomimimo.com）`
+    ? `将把 ${sendRows.value} 行消息文本发送到第三方 API（${destHost.value}）`
     : '',
 );
 
@@ -108,20 +143,88 @@ function invalidatePreflight(): void {
 
 watch([network, useAudit], invalidatePreflight);
 
+// 服务商切换（2026-11-13 BUG2）：Key 按槽隔离 → 清输入并回显该服务商已存状态。
+// 开联网只刷新回显、**不清输入**（原 @change 清空是「Key 保存不了」的成因之一）。
+watch(provider, () => {
+  apiKey.value = '';
+  void queryKeyState();
+});
+watch(network, () => {
+  void queryKeyState();
+});
+
 // ---------------------------------------------------------------- 预检 / 提取
 
-function baseParams(mode: 'preflight' | 'run'): ExtractTrackingParams {
+function baseParams(mode: 'preflight' | 'run' | 'key'): ExtractTrackingParams {
   const params: ExtractTrackingParams = {
     mode,
-    in_path: inPath.value.trim(),
     network: network.value,
     audit: useAudit.value,
     resume: resume.value,
+    provider: provider.value,
   };
-  if (useReuse.value && oldPath.value) params.old_path = oldPath.value.trim();
+  if (mode !== 'key') {
+    params.in_path = inPath.value.trim();
+    if (useReuse.value && oldPath.value) params.old_path = oldPath.value.trim();
+  }
+  if (isCustom.value) {
+    params.base_url = customBase.value.trim();
+    params.model = customModel.value.trim();
+  }
   if (network.value && apiKey.value) params.api_key = apiKey.value; // 显式填写才传
   if (mode === 'run') params.out_path = outPath.value.trim();
   return params;
+}
+
+/** mode=key 查询：该服务商本机是否已存 Key（切服务商/开联网时刷新回显） */
+async function queryKeyState(): Promise<void> {
+  try {
+    const r = await store.ipc.extractTracking({ mode: 'key', provider: provider.value });
+    if (r.mode === 'key') keyStored.value = r.key_stored;
+  } catch {
+    /* 查询失败不打断交互（回显维持原值） */
+  }
+}
+
+/** 保存 Key（2026-11-13 BUG2）：显式落盘，不必等预检/提取 */
+async function saveKey(): Promise<void> {
+  if (!apiKey.value.trim()) {
+    notice.value = '⚠ 请先填写 API Key';
+    log(notice.value);
+    return;
+  }
+  if (isCustom.value && (!activeBase.value || !customModel.value.trim())) {
+    notice.value = '⚠ 自定义服务商需填写 base_url 与模型名';
+    log(notice.value);
+    return;
+  }
+  try {
+    const r = await store.ipc.extractTracking(baseParams('key'));
+    if (r.mode === 'key') keyStored.value = r.key_stored;
+    apiKey.value = '';
+    notice.value = 'API Key 已加密保存到本机（DPAPI）';
+    log(notice.value);
+  } catch (e) {
+    notice.value = `⚠ ${asError(e).message}`;
+    log(notice.value);
+  }
+}
+
+/** 清除该服务商已存 Key */
+async function clearKey(): Promise<void> {
+  try {
+    const r = await store.ipc.extractTracking({
+      mode: 'key',
+      provider: provider.value,
+      clear_key: true,
+    });
+    if (r.mode === 'key') keyStored.value = r.key_stored;
+    notice.value = '已清除本机保存的 API Key';
+    log(notice.value);
+  } catch (e) {
+    notice.value = `⚠ ${asError(e).message}`;
+    log(notice.value);
+  }
 }
 
 function validateInputs(): boolean {
@@ -274,13 +377,13 @@ function revealOut(): void {
           断点续跑
         </label>
         <span class="f-sep"></span>
-        <!-- 拍板①：联网审核默认关、显式开启、可随时不用 -->
+        <!-- 拍板①：联网审核默认关、显式开启、可随时不用；
+             开关切换不清空 Key 输入（2026-11-13 BUG2：原 @change 清空导致「保存不了」） -->
         <label class="f-label trk-net-label">
           <input
             v-model="network"
             type="checkbox"
             data-testid="trk_var_network"
-            @change="apiKey = ''"
           />
           联网 AI 审核（可选，默认关闭）
         </label>
@@ -301,6 +404,41 @@ function revealOut(): void {
         需要更高准确率可开启上方「联网 AI 审核」。
       </div>
 
+      <!-- 服务商 + API Key（2026-11-13 BUG2：多选预设 + 自定义 + 显式保存/清除） -->
+      <div v-if="network" class="f-row">
+        <span class="f-label">服务商:</span>
+        <select
+          v-model="provider"
+          class="f-input"
+          data-testid="trk_provider"
+          @change="invalidatePreflight"
+        >
+          <option value="deepseek">DeepSeek</option>
+          <option value="mimo">小米 MiMo</option>
+          <option value="minimax">MiniMax</option>
+          <option value="custom">自定义</option>
+        </select>
+        <template v-if="isCustom">
+          <input
+            v-model="customBase"
+            class="f-input f-grow"
+            data-testid="trk_entry_base"
+            placeholder="base_url（如 https://api.deepseek.com/v1）"
+            @change="invalidatePreflight"
+          />
+          <input
+            v-model="customModel"
+            class="f-input"
+            data-testid="trk_entry_model"
+            placeholder="模型名（如 deepseek-chat）"
+            @change="invalidatePreflight"
+          />
+        </template>
+        <span v-else class="f-count" data-testid="trk_provider_info">
+          {{ activeBase }} · {{ presetModel }}
+        </span>
+      </div>
+
       <div v-if="network" class="f-row">
         <span class="f-label">API Key:</span>
         <input
@@ -309,13 +447,34 @@ function revealOut(): void {
           data-testid="trk_entry_key"
           type="password"
           :placeholder="
-            keyStored ? '已保存（DPAPI 加密存本机）；留空则用已保存的' : 'platform.xiaomimimo.com 控制台获取'
+            keyStored
+              ? '已保存（DPAPI 加密存本机）；留空则用已保存的'
+              : `${destHost} 控制台获取`
           "
           autocomplete="off"
         />
         <span class="f-count" data-testid="trk_key_state">
           {{ keyStored ? '本机已存 Key（加密）' : '未保存 Key' }}
         </span>
+        <button
+          type="button"
+          class="f-btn primary"
+          data-testid="btn_trk_save_key"
+          :disabled="running"
+          @click="saveKey"
+        >
+          保存 Key
+        </button>
+        <button
+          v-if="keyStored"
+          type="button"
+          class="f-btn"
+          data-testid="btn_trk_clear_key"
+          :disabled="running"
+          @click="clearKey"
+        >
+          清除已存 Key
+        </button>
       </div>
     </div>
 

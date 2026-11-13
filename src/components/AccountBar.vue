@@ -48,6 +48,12 @@ function onSelect(e: Event): void {
   store.setAccount((e.target as HTMLSelectElement).value);
 }
 
+/** 加载数据（2026-11-13 BUG1）：导出页等页签不必先跳「数据筛选」——
+ *  账号栏一键触发 store.load（与筛选页 btn_load 同一入口，未选账号时状态行提示）。 */
+function loadData(): void {
+  void store.load({ kind: 'store', options: { resolve_media: false } });
+}
+
 /** #13 手动设置数据目录（浏览器 dev 固定回 C:/mock/local-data，e2e 可断言） */
 async function pickDataRoot(): Promise<void> {
   const dir = await pickDir();
@@ -83,6 +89,15 @@ async function autoDataRoot(): Promise<void> {
       @click="store.scanAccounts()"
     >
       刷新账号
+    </button>
+    <button
+      type="button"
+      class="f-btn primary"
+      data-testid="btn_load_data"
+      :disabled="data.scanning || data.loading"
+      @click="loadData"
+    >
+      {{ data.loading ? '加载中…' : '加载数据' }}
     </button>
     <button
       type="button"

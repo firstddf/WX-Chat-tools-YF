@@ -113,3 +113,59 @@ test('快递单号提取 #19：预检与提取流程——参数入 calls、完�
   await expect(page.getByTestId('trk_notice')).toContainText('有单号行');
   await expect(page.getByTestId('trk_log')).toContainText('开始提取（纯本地）');
 });
+
+test('快递单号提取 BUG2：服务商多选 + 自定义 base_url/model + 披露去向随服务商', async ({
+  page,
+}) => {
+  await gotoTracking(page);
+  await page.getByTestId('btn_trk_in').click();
+
+  await page.getByTestId('trk_var_network').check();
+  const provider = page.getByTestId('trk_provider');
+  await expect(provider).toBeVisible();
+  await expect(provider).toHaveValue('mimo'); // 缺省 = 旧单 Key 口径
+
+  // 预设展示 base_url + 模型；去向进披露框（纯文本，零外链不放宽）
+  await expect(page.getByTestId('trk_provider_info')).toContainText('api.xiaomimimo.com');
+  await expect(page.getByTestId('trk_disclosure')).toContainText('api.xiaomimimo.com');
+
+  // 切 DeepSeek → 展示与披露去向同步
+  await provider.selectOption('deepseek');
+  await expect(page.getByTestId('trk_provider_info')).toContainText('api.deepseek.com');
+  await expect(page.getByTestId('trk_disclosure')).toContainText('api.deepseek.com');
+  await expect(page.getByTestId('trk_entry_base')).toHaveCount(0);
+
+  // 切自定义 → base_url/model 输入出现
+  await provider.selectOption('custom');
+  await expect(page.getByTestId('trk_entry_base')).toBeVisible();
+  await expect(page.getByTestId('trk_entry_model')).toBeVisible();
+  await expect(page.getByTestId('trk_provider_info')).toHaveCount(0);
+});
+
+test('快递单号提取 BUG2：保存 Key / 清除已存 Key（mode=key，不跑预检也能存）', async ({
+  page,
+}) => {
+  await gotoTracking(page);
+  await page.getByTestId('btn_trk_in').click();
+  await page.getByTestId('trk_var_network').check();
+
+  await expect(page.getByTestId('trk_key_state')).toContainText('未保存 Key');
+  await expect(page.getByTestId('btn_trk_clear_key')).toHaveCount(0);
+
+  // 空输入点保存 → 提示填写
+  await page.getByTestId('btn_trk_save_key').click();
+  await expect(page.getByTestId('trk_notice')).toContainText('请先填写 API Key');
+
+  // 填 Key 保存 → 状态翻转 + 输入清空 + 清除按钮出现（key 入 calls 供断言）
+  await page.getByTestId('trk_entry_key').fill('TEST-KEY-1');
+  await page.getByTestId('btn_trk_save_key').click();
+  await expect(page.getByTestId('trk_key_state')).toContainText('本机已存 Key');
+  await expect(page.getByTestId('trk_notice')).toContainText('已加密保存');
+  await expect(page.getByTestId('trk_entry_key')).toHaveValue('');
+  await expect(page.getByTestId('btn_trk_clear_key')).toBeVisible();
+
+  // 清除 → 回到未存
+  await page.getByTestId('btn_trk_clear_key').click();
+  await expect(page.getByTestId('trk_key_state')).toContainText('未保存 Key');
+  await expect(page.getByTestId('btn_trk_clear_key')).toHaveCount(0);
+});

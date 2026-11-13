@@ -206,31 +206,42 @@ pub async fn doctor(
 }
 
 /// `extract_tracking` → 转发通道③（快递单号提取，docs/02 §1.2 2026-11-13 #19）。
-/// `mode=preflight|run`；**键 camelCase**（inPath/oldPath/outPath/apiKey，见 docs/02 §2 注）。
-/// 超时：preflight 60s（本地读 CSV+宽筛）/ run 7200s（联网长跑，progress 保活）。
-/// `apiKey` 仅在用户显式开启联网并填写时非空——sidecar 侧 DPAPI 加密落盘，不回传不入库。
+/// `mode=preflight|run|key`；**键 camelCase**（inPath/oldPath/outPath/apiKey/provider/
+/// baseUrl/model/clearKey，见 docs/02 §2 注）。mode=key 只管本机 Key（保存/清除/查询），
+/// 不读文件 → inPath 可空。
+/// 超时：preflight/key 60s（本地读 CSV+宽筛）/ run 7200s（联网长跑，progress 保活）。
+/// `apiKey` 仅在用户显式开启联网并填写时非空——sidecar 侧 DPAPI 按服务商加密落盘，
+/// 不回传不入库。
 #[tauri::command]
 pub async fn extract_tracking(
     mode: String,
-    in_path: String,
+    in_path: Option<String>,
     old_path: Option<String>,
     out_path: Option<String>,
     network: Option<bool>,
+    provider: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+    clear_key: Option<bool>,
     api_key: Option<String>,
     audit: Option<bool>,
     resume: Option<bool>,
     force: Option<bool>,
     manager: State<'_, SidecarManager>,
 ) -> Result<Value, AppError> {
-    if mode != "preflight" && mode != "run" {
+    if mode != "preflight" && mode != "run" && mode != "key" {
         return Err(AppError::internal(format!(
-            "mode 取值非法: {mode:?}（应为 preflight|run）"
+            "mode 取值非法: {mode:?}（应为 preflight|run|key）"
         )));
     }
-    if in_path.trim().is_empty() {
+    let in_path = in_path.unwrap_or_default();
+    if mode != "key" && in_path.trim().is_empty() {
         return Err(AppError::internal("extract_tracking 缺少 in_path"));
     }
-    let mut params = json!({ "mode": mode, "in_path": in_path });
+    let mut params = json!({ "mode": mode });
+    if mode != "key" {
+        params["in_path"] = json!(in_path);
+    }
     if let Some(o) = old_path.filter(|s| !s.is_empty()) {
         params["old_path"] = json!(o);
     }
@@ -245,6 +256,18 @@ pub async fn extract_tracking(
     }
     if let Some(n) = network {
         params["network"] = json!(n);
+    }
+    if let Some(p) = provider.filter(|s| !s.is_empty()) {
+        params["provider"] = json!(p);
+    }
+    if let Some(b) = base_url.filter(|s| !s.is_empty()) {
+        params["base_url"] = json!(b);
+    }
+    if let Some(m) = model.filter(|s| !s.is_empty()) {
+        params["model"] = json!(m);
+    }
+    if let Some(c) = clear_key {
+        params["clear_key"] = json!(c);
     }
     if let Some(k) = api_key.filter(|s| !s.is_empty()) {
         params["api_key"] = json!(k);

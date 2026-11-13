@@ -88,12 +88,17 @@ export class TauriIpc implements Ipc {
   async extractTracking(params: ExtractTrackingParams): Promise<ExtractTrackingResult> {
     try {
       // 键 camelCase（docs/02 §2 注）；apiKey 仅联网且用户填写时非空
+      // provider/baseUrl/model/clearKey（2026-11-13 BUG2）：mode=key 只管本机 Key
       return await invoke<ExtractTrackingResult>('extract_tracking', {
         mode: params.mode,
-        inPath: params.in_path,
+        inPath: params.in_path ?? null,
         oldPath: params.old_path ?? null,
         outPath: params.out_path ?? null,
         network: params.network ?? false,
+        provider: params.provider ?? null,
+        baseUrl: params.base_url ?? null,
+        model: params.model ?? null,
+        clearKey: params.clear_key ?? false,
         apiKey: params.api_key ?? null,
         audit: params.audit ?? true,
         resume: params.resume ?? true,

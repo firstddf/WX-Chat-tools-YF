@@ -150,3 +150,30 @@ describe('加载数据时传 account（docs/02 §2 load_data）', () => {
     expect(status(wrapper)).toContain('共 6 条消息');
   });
 });
+
+describe('账号栏「加载数据」按钮（2026-11-13 BUG1：导出页不必先跳数据筛选）', () => {
+  it('按钮触发 store.load（kind=store）；加载中禁用并显示「加载中…」', async () => {
+    const { wrapper, ipc } = await mountApp({ messageCount: 3 });
+    const btn = wrapper.find('[data-testid="btn_load_data"]');
+    expect(btn.exists()).toBe(true);
+    expect(btn.text()).toBe('加载数据');
+
+    await btn.trigger('click');
+    await flushPromises();
+
+    expect(loadDataCalls(ipc)).toHaveLength(1);
+    expect(loadDataCalls(ipc)[0]!.params).toMatchObject({ kind: 'store' });
+    expect(status(wrapper)).toContain('共 3 条消息');
+    // 完成后按钮复位
+    expect(btn.text()).toBe('加载数据');
+    expect(btn.attributes('disabled')).toBeUndefined();
+  });
+
+  it('未选账号点它：不调 loadData，状态行「请先选择账号」（与筛选页 btn_load 同口径）', async () => {
+    const { wrapper, ipc } = await mountApp({ accounts: [] });
+    await wrapper.find('[data-testid="btn_load_data"]').trigger('click');
+    await flushPromises();
+    expect(loadDataCalls(ipc)).toHaveLength(0);
+    expect(status(wrapper)).toContain('请先选择账号');
+  });
+});

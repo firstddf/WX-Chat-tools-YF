@@ -25,7 +25,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
       <div class="modal-body" data-testid="help_body">
         <h4 data-testid="help_sec_quick">快速上手</h4>
         <ul>
-          <li>1）顶部账号栏确认账号与数据目录 → 到「数据筛选」页点<b>「加载/刷新数据」</b>；</li>
+          <li>1）顶部账号栏确认账号与数据目录 → 点账号栏<b>「加载数据」</b>（任何页签都能点，
+            不必先跳「数据筛选」页；该页的「加载/刷新数据」为同一入口）；</li>
           <li>2）用关键词 / 群号 / 日期 / 类型筛选，勾选要导出的消息；</li>
           <li>3）到<b>「导出」页</b>勾选会话、设时间范围与内容类型、选输出目录 → <b>「▶ 开始导出」</b>；</li>
           <li>4）完成后点「打开导出目录」，用浏览器打开 HTML 浏览页即可离线查看。</li>
@@ -40,6 +41,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             <b>快递单号提取</b>：把导出 CSV 里的快递单号提到首列（多单号拆行、增量复用）。
             <b>默认纯本地</b>（准确率有限）；联网 AI 审核<b>可选</b>（默认关闭），
             开启时先点「预检」查看将发送的行数与去向。
+            联网时可选<b>服务商</b>：<b>DeepSeek / 小米 MiMo / MiniMax</b> 预设，
+            或<b>自定义</b>（填 base_url 与模型名）；每个服务商的 API Key
+            <b>各自独立保存</b>，点<b>「保存 Key」</b>即加密存本机（不必等预检），
+            随时可<b>「清除已存 Key」</b>。
           </li>
         </ul>
 
@@ -55,7 +60,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
         <ul>
           <li>
             <b>提示 KEY_NOT_FOUND「微信未运行或没登录」</b>：解密密钥只存在于已登录的微信进程内存里
-            → 先启动并登录微信，再点加载/重试。
+            → 先启动并登录微信，再点账号栏「加载数据」或「加载/刷新数据」重试。
           </li>
           <li>
             <b>提示「没有发现微信账号目录」</b>：数据目录不在常见位置 → 账号栏
@@ -94,7 +99,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
             开启时界面明示将发送的行数与去向）；其余任何页签与功能均不联网；
           </li>
           <li>解密密钥仅从微信进程内存读取，<b>不落盘、不写日志</b>；</li>
-          <li>快递单号提取的 API Key 用 Windows DPAPI <b>加密</b>存本机，不落明文；</li>
+          <li>
+            快递单号提取的 API Key 按<b>服务商分槽</b>，用 Windows DPAPI <b>加密</b>存本机
+            （仅当前 Windows 账户可解、明文不落盘），可随时「清除已存 Key」；不回传、不入库；
+          </li>
           <li>导出产物与截图等证据目录保存在你选择的位置，由你自己管理。</li>
         </ul>
 

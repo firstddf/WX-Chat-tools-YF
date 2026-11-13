@@ -20,6 +20,13 @@
 > + 壳命令 `extract_tracking` + progress 新 phase `extract_tracking`——
 > **本地宽筛/规则提取为默认路径，联网 AI 审核为用户可选项（默认关）**；
 > 联网时的**字段最小化、只发候选行、Key DPAPI 加密、不落盘原文**为协议约束（见 §1.2 块）。
+>
+> **2026-11-13 0.2.1 增补（v1 内兼容扩展，不递增版本；BUG1/BUG2）**：
+> `extract_tracking` 增 `mode:"key"`（只管本机 Key，不读文件不调 API）与
+> `provider`/`base_url`/`model`/`clear_key`（服务商多选：deepseek/mimo/minimax/custom，
+> Key **按服务商分槽 DPAPI** 加密）——均为**新增可选字段**，缺省行为与 0.2.0 逐字一致
+> （`provider` 缺省 `mimo`，`key_stored` 改为「当前服务商槽」语义）；
+> 前端账号栏新增**「加载数据」**按钮（纯前端复用 `load_source`，协议不变）。
 
 ## 0. 三层通信总览
 
@@ -64,7 +71,7 @@
 | `export` | `{format:"json"\|"csv", scope, out_path}` 或 `{format:"bundle", out_path}`（bundle 见下） | `{path, count, bytes}` | json/csv：`guidata.to_records/write_json/write_csv`，**作用于已加载的内存数据**（D3），未先 `load_source` → `SOURCE_UNAVAILABLE`；bundle：**本地数据包**（见下），同一互斥锁与未加载口径 |
 | `doctor` | `{}` 或 `{root}`（**显式数据目录**，shell 由 settings.data_root 注入，与 `scan_accounts` 同口径；2026-11-09 #3） | `{version, account:{wxid,root}, key_sources:{mode,pid,hit,total,missing}, dbs:[{name,ok}], messages?}` | **数据层自检**（复用 `cli.cmd_doctor` 数据部分，不 import argparse 命令行壳）：发现账号 → 提取密钥 → 逐库解密 → 消息总数；与 load/export **互斥**（`EXPORTING_BUSY`）；无账号 → `NO_ACCOUNT`、密钥取不到 → `KEY_NOT_FOUND`（微信未运行）；**部分库解密失败不报错**——`dbs[].ok=false` 逐库呈现；`messages` 仅在库可读时给出（缺省时前端显示 `—`）；**不含任何密钥值**（docs/03 §5） |
 | `doctor` | `{}` 或 `{root}`（**显式数据目录**，shell 由 settings.data_root 注入，与 `scan_accounts` 同口径；2026-11-09 #3） | `{version, account:{wxid,root}, key_sources:{mode,pid,hit,total,missing}, dbs:[{name,ok}], messages?}` | **数据层自检**（复用 `cli.cmd_doctor` 数据部分，不 import argparse 命令行壳）：发现账号 → 提取密钥 → 逐库解密 → 消息总数；与 load/export **互斥**（`EXPORTING_BUSY`）；无账号 → `NO_ACCOUNT`、密钥取不到 → `KEY_NOT_FOUND`（微信未运行）；**部分库解密失败不报错**——`dbs[].ok=false` 逐库呈现；`messages` 仅在库可读时给出（缺省时前端显示 `—`）；**不含任何密钥值**（docs/03 §5） |
-| `extract_tracking` | `{mode:"preflight"\|"run", in_path, old_path?, out_path?, network?, api_key?, audit?, resume?, force?}`（形状见下方 **2026-11-13 #19 增补块**） | preflight → `{mode, rows, candidates, reuse_rows, batches, send_rows, key_stored}`；run → `{mode, path, rows, out_rows, with_numbers, numbers, reused_rows, sent_rows, tokens, elapsed, network}` | **快递单号提取**（docs/07 #19，源工具流水线搬入 `launcher.py`）：增量复用 → **程序宽筛**（`PREF_RE`/`RUN_RE` + 9~16 位数字规则）→ `network:false`（默认）**本地规则提取**，`network:true` **分批调 MiMo API 语义审核** → 合并 → 校验 → 输出 CSV（首列=快递单号、多单号拆行、其余列原样）；与 load/export **互斥**（`EXPORTING_BUSY`）；进度走 progress `phase:"extract_tracking"`；**联网为用户可选、默认关**，字段最小化与不落盘约束见增补块 |
+| `extract_tracking` | `{mode:"preflight"\|"run"\|"key", in_path?, old_path?, out_path?, network?, provider?, base_url?, model?, clear_key?, api_key?, audit?, resume?, force?}`（`in_path` 除 mode=key 外必给；形状见下方 **2026-11-13 #19 增补块**） | preflight → `{mode, rows, candidates, reuse_rows, batches, send_rows, key_stored}`；run → `{mode, path, rows, out_rows, with_numbers, numbers, reused_rows, sent_rows, tokens, elapsed, network}`；key → `{mode, key_stored}` | **快递单号提取**（docs/07 #19，源工具流水线搬入 `launcher.py`）：增量复用 → **程序宽筛**（`PREF_RE`/`RUN_RE` + 9~16 位数字规则）→ `network:false`（默认）**本地规则提取**，`network:true` **分批调所选服务商 API 语义审核**（`provider`：deepseek/mimo/minimax/custom，2026-11-13 0.2.1） → 合并 → 校验 → 输出 CSV（首列=快递单号、多单号拆行、其余列原样）；`mode:key` 只管本机 Key（保存/清除/查询，按服务商分槽 DPAPI）；与 load/export **互斥**（`EXPORTING_BUSY`）；进度走 progress `phase:"extract_tracking"`；**联网为用户可选、默认关**，字段最小化与不落盘约束见增补块 |
 | `stop` | `{}` | `{ok:true}` | 优雅退出（随后 EOF） |
 
 > **M-A1 实现子集**：`ping / scan_accounts / load_source / export / stop`
@@ -125,11 +132,16 @@
 // params（未知键/非预期类型 → INTERNAL，同 set_settings/bundle options 白名单口径）
 {"mode": "preflight",            // "preflight"=预检（读文件+宽筛+复用对比，不调 API、不写产物）
                                  // "run"=执行（本地或联网，按 network 分路）
- "in_path": "D:\\导出\\微信导出.csv",   // 必填：输入 CSV（本程序导出列，含「内容」「类型」列）
+                                 // "key"=**只管本机 Key**（保存/清除/查询；不读文件不调 API，in_path 可省）
+ "in_path": "D:\\导出\\微信导出.csv",   // preflight/run 必填：输入 CSV（本程序导出列，含「内容」「类型」列）；mode=key 省
  "old_path": "D:\\导出\\上次_提取快递单号.csv", // 可选：旧成品（首列=快递单号）→ 增量复用；缺省/空串=不复用
  "out_path": "D:\\导出\\微信导出_提取快递单号.csv", // run 必填（绝对路径）；preflight 可省
  "network": false,               // 联网 AI 审核开关：**默认 false=纯本地**；true=分批调第三方 API
- "api_key": "",                  // network=true 时必给（或本机已有已存 Key）；**DPAPI 加密存本机，见下**
+ "provider": "mimo",             // 服务商（2026-11-13 0.2.1 增补）：deepseek|mimo|minimax|custom，缺省 "mimo"（旧口径）
+ "base_url": "",                 // provider=custom 且 network=true 时必给；预设商忽略
+ "model": "",                    // provider=custom 且 network=true 时必给；预设商忽略
+ "clear_key": false,             // mode=key：true=清除该服务商已存 Key；false/缺省=保存（带 api_key）或查询
+ "api_key": "",                  // network=true 时必给（或本机已有已存 Key）；**DPAPI 按服务商加密存本机，见下**
  "audit": true,                  // 抽样回检（从落选行随机抽 ≤300 行复核）；仅 network=true 有意义
  "resume": true,                 // 断点续跑（跳过 result_*.json 已完成批次）
  "force": false}                 // 校验有疑点仍强制导出
@@ -140,7 +152,10 @@
  "reuse_rows":512,                        // 命中旧成品直接复用的行数
  "batches":12,                            // 联网时预估批次数（本地=0）
  "send_rows":843,                         // **实际将发送行数**（含回检抽样；network=false 时=0）
- "key_stored":false}                      // 本机是否已有 DPAPI 存储的 API Key
+ "key_stored":false}                      // **当前 provider** 槽是否已有 DPAPI 存储的 API Key
+
+// key result（mode=key；不回明文，只有布尔）
+{"mode":"key", "key_stored":true}         // 保存/清除/查询后的该服务商槽状态
 
 // run result
 {"mode":"run", "path":"..._提取快递单号.csv",
@@ -153,9 +168,20 @@
 ```
 
 - **联网为可选项（拍板①）**：`network` **默认 false = 纯本地**（程序宽筛 + 规则提取，
-  UI 明示「纯本地准确率有限」）；`true` 时才调 `api.xiaomimimo.com/v1`（模型 `mimo-v2.6-flash`、
-  并发 6、每批 9000 字/110 行、429/5xx 指数退避）；用户可随时不用（关掉开关即回本地）；
+  UI 明示「纯本地准确率有限」）；`true` 时才调所选服务商 API（见下「服务商」）；
+  用户可随时不用（关掉开关即回本地）；
   **联网声明按页隔离**——本方法之外的全程序口径仍是「不联网」；
+- **服务商（2026-11-13 0.2.1 增补，BUG2）**：`provider` ∈ `deepseek|mimo|minimax|custom`
+  （缺省 `mimo` = 0.2.0 旧口径，升级不改变行为）。预设 base_url/model（sidecar
+  `TRACK_PROVIDERS`，与前端展示一致）：
+  | provider | base_url | model |
+  |---|---|---|
+  | `deepseek` | `https://api.deepseek.com/v1` | `deepseek-chat` |
+  | `mimo` | `https://api.xiaomimimo.com/v1` | `mimo-v2.6-flash` |
+  | `minimax` | `https://api.minimaxi.com/v1` | `MiniMax-M2` |
+  | `custom` | params `base_url` | params `model` |
+  custom 且 `network=true` 而 base_url/model 有空 → `INTERNAL`（message 指明）。
+  预设商的并发/批大小/退避参数沿用 mimo 口径（并发 6、每批 9000 字/110 行、429/5xx 指数退避）；
 - **上传去隐私（拍板③，硬要求，契约断言逐条固化）**：
   1. **字段最小化**：请求体每行**只含** `row`（int，输入 CSV 行号 1-based）+ `type`（字符串，
      「类型」列）+ `content`（字符串，「内容」列）三键——**绝不发送** 时间/日期/会话/群号/发送人/
@@ -166,16 +192,20 @@
   4. **日志不打印原文**：progress message 与 stderr 日志只出行号/计数/单号，不回显 `content`；
   5. 发送内容仅用于本次审核，不写入导出产物/统计；
 - **API Key 不落明文（拍板③）**：sidecar 侧 **Windows DPAPI**（`ctypes` + `crypt32`，
-  零第三方依赖）加密后存 `%APPDATA%\com.wxchart.app\tracking.key`（**不入库、不进
-  `settings.json`、不回传前端**——result 只给 `key_stored` 布尔）；`network=true` 且
-  params 未带 `api_key` 时读本机已存 Key，读不到 → `INTERNAL`（message 指明「请填写 API Key」）；
-  前端只在开启联网时展示 Key 输入框，保存动作走 `extract_tracking` 的 `api_key` 字段随下一次调用写入；
+  零第三方依赖）加密后按**服务商分槽**存 `%APPDATA%\com.wxchart.app\tracking[_<provider>].key`
+  （mimo 槽沿用旧文件名 `tracking.key`，**0.2.0 已存 Key 升级不丢**；
+  **不入库、不进 `settings.json`、不回传前端**——result 只给 `key_stored` 布尔）；
+  `network=true` 且 params 未带 `api_key` 时读**该服务商槽**的已存 Key，读不到 →
+  `INTERNAL`（message 指明「请填写 API Key」）；前端只在开启联网时展示 Key 输入区，
+  **显式保存走 `mode:"key"`**（`api_key` 非空即落盘，不必等预检/提取；`clear_key:true`
+  删该槽），预检/提取带 `api_key` 时同样顺带保存（0.2.0 旧口径保留）；
 - **互斥与超时**：与 load/export/resolve_media/doctor 共用互斥锁（冲突 `EXPORTING_BUSY`）；
   壳命令超时 `PREFLIGHT_TIMEOUT = 60s`（本地读 CSV + 宽筛）/
   `EXTRACT_TIMEOUT = 7200s`（联网长跑：源工具自估 1000 候选行 ≈20–40 分钟，
   批次重试上界更长——900s 会顶穿；期间靠 progress 保活，超时/中断后重跑按断点续跑补齐）；
-- **错误**：`in_path` 缺失/不存在/缺「内容」列 → `INTERNAL`（message 指明）；
-  `mode` 取值非法 → `INTERNAL`；`out_path` 非绝对路径 → `INTERNAL`（同 export 口径）；
+- **错误**：`in_path` 缺失/不存在/缺「内容」列 → `INTERNAL`（message 指明；`mode=key` 不校验
+  `in_path`）；`mode` 取值非法 → `INTERNAL`；`provider` 取值非法 → `INTERNAL`；
+  `out_path` 非绝对路径 → `INTERNAL`（同 export 口径）；
   校验发现疑点且 `force=false` → `INTERNAL`（message 含疑点数，提示可 `force` 重跑）。
 
 ### 1.3 共享数据形状
@@ -247,7 +277,7 @@ media[{kind,name,path}], day_page`。
 | `open_path` | `{path}` | `{ok}` | opener 插件；路径必须在导出目录/附件 scope 内，否则 `PATH_NOT_ALLOWED` |
 | `reveal_path` | `{path}` | `{ok}` | 在资源管理器中定位 |
 | `doctor` | `{}`（shell 注入 `settings.data_root` → 通道③ `root`，前端不直接传；#13 同口径） | 见 §1.2 | 转发通道③ `doctor`；**超时 30s**（解密全库比 10s 默认长，docs/07 #3） |
-| `extract_tracking` | `{mode, inPath?, oldPath?, outPath?, network?, apiKey?, audit?, resume?, force?}`（**键 camelCase**，见上注；#19 2026-11-13） | preflight/run 见 §1.2 `extract_tracking` 增补块 | 转发通道③ `extract_tracking`；**超时 preflight 60s / run 7200s**（联网长跑，见 §1.2 增补块「互斥与超时」）；`apiKey` 仅在用户显式开启联网并填写时非空，sidecar 侧 DPAPI 加密落盘、**不回传不入库** |
+| `extract_tracking` | `{mode, inPath?, oldPath?, outPath?, network?, provider?, baseUrl?, model?, clearKey?, apiKey?, audit?, resume?, force?}`（**键 camelCase**，见上注；#19 2026-11-13；0.2.1 增 provider/baseUrl/model/clearKey 与 mode=key） | preflight/run/key 见 §1.2 `extract_tracking` 增补块 | 转发通道③ `extract_tracking`；**超时 preflight/key 60s / run 7200s**（联网长跑，见 §1.2 增补块「互斥与超时」）；`inPath` 除 mode=key 外必给；`apiKey` 仅在用户显式开启联网并填写时非空，sidecar 侧 DPAPI 按服务商加密落盘、**不回传不入库** |
 | `get_settings` | `{}` | `{last_account, last_export_dir, data_root}`（均为 string，缺省 `""`） | 读应用设置；文件不存在/损坏 → 默认值（**损坏容忍**，2026-11-09 #4 冻结；`data_root` 为 #13 增补——微信数据目录，空串=自动发现） |
 | `set_settings` | `{patch:{last_account?, last_export_dir?, data_root?}}` | 合并后的全量设置（同上形状） | **白名单字段**合并写入 `%APPDATA%\com.wxchart.app\settings.json`（原子 tmp+rename）；**未知字段/非字符串值 → `INTERNAL`**（message 指明字段——防 `lastAccount` 这类拼写静默丢失）；单窗口，跨窗口同步见 §3 `settings://changed` 裁剪注 |
 
